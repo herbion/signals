@@ -1,0 +1,18 @@
+-- Migration 017: `/process` -- replaying a message the bridge never ran rules
+-- on (it was restarting, the websocket had dropped, signal-cli-rest-api was
+-- down).
+--
+-- Inbound delivery is live-only: signal-cli-rest-api hands an envelope to
+-- whatever websocket client is attached at that moment, and nothing is kept
+-- for a client that reconnects later. Signal has no server-side history to
+-- re-fetch either, so the operator's own forwarded copy of the text is the
+-- only way that message can ever reach the pipeline again.
+--
+-- `/process` is sent to the bot as a direct message, which leaves it with no
+-- group -- and inbound rules are routinely scoped to one group
+-- (`source_scope` / `source_group_id`), so a replay with no group would match
+-- no rule at all and look like the command had been ignored. This is the
+-- group a replay is attributed to. It stays NULL on installs with exactly one
+-- enabled subscription, where that single group is unambiguous enough to use
+-- on its own -- see `replayGroupId` in signal/replayCommand.js.
+ALTER TABLE signal_settings ADD COLUMN default_replay_group_id TEXT;

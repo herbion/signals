@@ -1,0 +1,11 @@
+-- Migration 016: let a create_ticket action set a finish date as "N days from
+-- creation" instead of requiring the rule author to template startDate/dueDate
+-- by hand.
+--
+-- duration_days is nullable. When set, createTicket in
+-- inboundActionExecutor.js fills `startDate` with the creation date and
+-- `dueDate` with `startDate` + duration_days -- calendar days, since consulting
+-- OpenProject's own working-days calendar would need a second API round trip
+-- per ticket. It only fills a date field_templates left empty, so a rule that
+-- still wants to template one of the two dates by hand is not overridden.
+ALTER TABLE inbound_rule_actions ADD COLUMN duration_days INTEGER;

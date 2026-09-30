@@ -1,0 +1,49 @@
+services:
+  app-backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      - PORT=3000
+      - DB_PATH=/data/app.db
+      - JWT_SECRET=${JWT_SECRET}
+      - ADMIN_INIT_USERNAME=${ADMIN_INIT_USERNAME}
+      - ADMIN_INIT_PASSWORD=${ADMIN_INIT_PASSWORD}
+      - SIGNAL_API_BASE_URL=http://signal-api:8080
+      - NODE_ENV=production
+    volumes:
+      - sqlite-data:/data
+    depends_on:
+      signal-api:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+
+  signal-api:
+    image: bbernhard/signal-cli-rest-api:latest
+    restart: unless-stopped
+    environment:
+      # NOT json-rpc-native. The `-native` builds are GraalVM native images,
+      # and this one dies with a StackOverflowError at the JNI boundary when
+      # asked to react to a message whose author is known only by UUID --
+      # which is every sender who keeps their phone number private, i.e. most
+      # of them. The process exits (status 99), supervisord restarts it, and
+      # the HTTP request that triggered it hangs forever. The JVM build
+      # answers the same request 204 in under a second. It is a little slower
+      # to start; memory measured *lower* here, not higher (235 MiB against
+      # the native build's 339 MiB). Both are json-rpc modes, so /v1/receive
+      # stays a websocket and nothing in the app changes.
+      # See CLAUDE.md, signal-cli-rest-api quirks.
+      - MODE=${SIGNAL_MODE:-json-rpc}
+    volumes:
+      - signal-cli-data:/home/.local/share/signal-cli
+    ports:
+      # Exposed on the host for the one-time QR-link step
+      # (http://<host>:8081/v1/qrcodelink?device_name=...). Can be made
+      # internal-only (drop this ports block) once the bot number is linked.
+      - "8081:8080"
+
+volumes:
+  sqlite-data:
+  signal-cli-data:

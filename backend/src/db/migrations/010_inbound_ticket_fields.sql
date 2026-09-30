@@ -1,0 +1,16 @@
+-- Migration 010: let a create_ticket action fill any writable work package
+-- field, not just subject and description.
+--
+-- OpenProject types can make custom fields mandatory (on this install
+-- "Телеграма" requires customField14, "Довідка" requires customField1,
+-- customField19 and customField21), and types with a generated subject
+-- pattern report `subject` as NOT writable. A fixed subject/description pair
+-- therefore cannot create a work package of those types at all -- every
+-- attempt came back 422.
+--
+-- `field_templates` is a JSON object of schema key -> template string, e.g.
+--   {"customField14": "{subject}", "customField1": "313"}
+-- rendered with the same variables as the other templates. Link-typed fields
+-- store the id (or href) a dropdown produced; string fields store text that
+-- may contain capture variables.
+ALTER TABLE inbound_rule_actions ADD COLUMN field_templates TEXT;

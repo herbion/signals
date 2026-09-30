@@ -1,0 +1,24 @@
+-- Migration 013: values a contact supplies to a work package, and a fallback
+-- for a list value that cannot be matched.
+--
+-- An OpenProject type can require a custom field whose value is not in the
+-- Signal message at all. "👤Замовник" is the case this was built for: the
+-- requester is whoever sent the message, and which list entry that person is
+-- can only be said by a human. So the answer is stored on the contact --
+-- `field_values` is a JSON map of schema key -> option id, e.g.
+--   {"customField7": "412"}
+-- and a rule points the field at "the sender's contact" rather than a
+-- template.
+--
+-- `needs_classification` is how the dashboard asks for that answer. It is set
+-- when a rule wanted a value from a contact and found none (and the contact is
+-- created on the spot if the sender was never seen before), and cleared as
+-- soon as a human fills the value in. Contacts are not otherwise flagged: a
+-- contact nothing asks anything of has nothing to classify.
+--
+-- Meanwhile the ticket is still filed, using the field mapping's `fallback`
+-- option -- on this install those options are literally named "Інше (Вкажу в
+-- описі)", and what was actually asked for is appended to the description, so
+-- the fallback tells the truth rather than hiding the gap.
+ALTER TABLE contacts ADD COLUMN field_values TEXT;
+ALTER TABLE contacts ADD COLUMN needs_classification INTEGER NOT NULL DEFAULT 0;

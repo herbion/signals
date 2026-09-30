@@ -1,0 +1,15 @@
+-- Migration 015: let a create_ticket action's own description stand on its own.
+--
+-- `buildDescription` in inboundActionExecutor.js always prepended a plain-text
+-- "Reported by / Source / Received" block above whatever description_template
+-- rendered -- fine for a one-line message, but a rule whose template is its
+-- own rich HTML layout (an OpenProject-style <figure>/<table> block with its
+-- own header row) doesn't want plain markdown text glued above it, and moving
+-- provenance to the bottom reads better either way -- it's metadata about the
+-- request, not the request itself.
+--
+-- `include_provenance` (default on, matching every rule saved before this)
+-- keeps the block but appends it after the rendered body instead of before;
+-- a rule can turn it off per action when the template already carries its own
+-- who/where/when.
+ALTER TABLE inbound_rule_actions ADD COLUMN include_provenance INTEGER NOT NULL DEFAULT 1;

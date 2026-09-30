@@ -1,0 +1,329 @@
+/*
+ * Design tokens + base component styles.
+ *
+ * Every colour used anywhere in the app is defined here as a custom property
+ * on :root (light) and :root[data-theme='dark'], so views never hard-code a
+ * colour and both themes stay in sync by construction. The theme store
+ * stamps data-theme on <html>.
+ */
+
+:root {
+  --primary: #7367f0;
+  --primary-hover: #6054e6;
+  --primary-soft: rgba(115, 103, 240, 0.12);
+  --on-primary: #ffffff;
+
+  --success: #28c76f;
+  --success-soft: rgba(40, 199, 111, 0.14);
+  --danger: #ea5455;
+  --danger-soft: rgba(234, 84, 85, 0.14);
+  --warning: #ff9f43;
+  --warning-soft: rgba(255, 159, 67, 0.14);
+  --info: #00cfe8;
+  --info-soft: rgba(0, 207, 232, 0.14);
+
+  --bg: #f8f7fa;
+  --surface: #ffffff;
+  --surface-2: #f3f2f6;
+  --sidebar: #ffffff;
+  --text: #2f2b3d;
+  --text-muted: #6f6b7d;
+  --text-faint: #a5a3ae;
+  --border: #e4e3e8;
+
+  --shadow-sm: 0 2px 6px rgba(47, 43, 61, 0.08);
+  --shadow-md: 0 4px 18px rgba(47, 43, 61, 0.1);
+
+  --radius: 10px;
+  --radius-lg: 14px;
+  --sidebar-w: 244px;
+  --topbar-h: 60px;
+}
+
+:root[data-theme='dark'] {
+  --primary-soft: rgba(115, 103, 240, 0.22);
+
+  --success-soft: rgba(40, 199, 111, 0.18);
+  --danger-soft: rgba(234, 84, 85, 0.18);
+  --warning-soft: rgba(255, 159, 67, 0.18);
+  --info-soft: rgba(0, 207, 232, 0.18);
+
+  --bg: #25293c;
+  --surface: #2f3349;
+  --surface-2: #383d59;
+  --sidebar: #2f3349;
+  --text: #d5d8ec;
+  --text-muted: #a0a5c4;
+  --text-faint: #7b81a6;
+  --border: #414765;
+
+  --shadow-sm: 0 2px 6px rgba(15, 17, 26, 0.3);
+  --shadow-md: 0 4px 18px rgba(15, 17, 26, 0.4);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Themed scrollbars, so dark mode doesn't get bright grey gutters. */
+* {
+  scrollbar-color: var(--border) transparent;
+  scrollbar-width: thin;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 6px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+h1 {
+  font-size: 1.3rem;
+  font-weight: 600;
+  margin: 0;
+}
+h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 0.35rem;
+}
+
+a {
+  color: var(--primary);
+}
+
+/* ---------- surfaces ---------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+/* ---------- buttons ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--primary);
+  color: var(--on-primary);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s, transform 0.05s;
+}
+.btn:hover:not(:disabled) {
+  background: var(--primary-hover);
+  box-shadow: 0 3px 10px var(--primary-soft);
+}
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.btn.secondary {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+.btn.secondary:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+  box-shadow: none;
+}
+.btn.danger {
+  background: var(--danger);
+}
+.btn.danger:hover:not(:disabled) {
+  background: #d94446;
+  box-shadow: 0 3px 10px var(--danger-soft);
+}
+.btn.small {
+  padding: 0.3rem 0.65rem;
+  font-size: 0.78rem;
+}
+
+/* ---------- forms ---------- */
+
+input,
+select,
+textarea {
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-family: inherit;
+  background: var(--surface);
+  color: var(--text);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-faint);
+}
+select {
+  cursor: pointer;
+}
+/* Native checkboxes stay light-on-light in dark mode without this. */
+input[type='checkbox'] {
+  accent-color: var(--primary);
+  width: auto;
+}
+
+label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  display: block;
+  margin-bottom: 0.3rem;
+}
+.field {
+  margin-bottom: 1.1rem;
+}
+
+/* ---------- tables ---------- */
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+th,
+td {
+  text-align: left;
+  padding: 0.7rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+th {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--surface-2);
+  white-space: nowrap;
+}
+th:first-child {
+  border-top-left-radius: 8px;
+}
+th:last-child {
+  border-top-right-radius: 8px;
+}
+tbody tr:last-child td {
+  border-bottom: none;
+}
+tbody tr:hover td {
+  background: var(--surface-2);
+}
+.table-wrap {
+  overflow-x: auto;
+}
+.empty-row {
+  text-align: center;
+  color: var(--text-faint);
+  padding: 2rem !important;
+}
+
+/* ---------- badges ---------- */
+
+.badge {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.badge.sent {
+  background: var(--success-soft);
+  color: var(--success);
+}
+.badge.received {
+  background: var(--info-soft);
+  color: var(--info);
+}
+.badge.failed {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.badge.pending {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.badge.neutral,
+/* Suppressed by a contact mute -- not an error, so deliberately not red. */
+.badge.muted {
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
+/* ---------- misc ---------- */
+
+.error-banner {
+  background: var(--danger-soft);
+  color: var(--danger);
+  padding: 0.7rem 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+}
+.hint {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+code {
+  background: var(--surface-2);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  font-size: 0.8em;
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+}
+.header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+.actions {
+  display: flex;
+  gap: 0.5rem;
+}
