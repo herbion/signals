@@ -110,9 +110,38 @@ export function buildPreviousEvaluationContext(changeSet) {
  * firing now would repeat a notification the recipient already got.
  *
  * Transition conditions (`changed_to`, `any_change`, `event_type_created`, …)
- * are inherently false against the prior state, so this never suppresses
- * them -- it only stops state-only rules from re-firing.
+ * are inherently false against the prior state, but that alone is not enough
+ * to protect them: in "type is Запит AND (status is Нова OR assignee
+ * changed)" the OR was already true through status, so a reassignment of a
+ * ticket sitting in Нова was suppressed and nobody was told. A match that a
+ * transition happening *now* takes part in is a new event, never a repeat,
+ * so only a match made of state conditions alone is suppressed.
  */
-export function ruleAlreadyMatched(conditionTree, changeSet) {
-  return evaluateConditionTree(conditionTree, buildPreviousEvaluationContext(changeSet));
+export function ruleAlreadyMatched(conditionTree, changeSet, eventType = null) {
+  if (!evaluateConditionTree(conditionTree, buildPreviousEvaluationContext(changeSet))) return false;
+  return !matchedThroughTransition(conditionTree, buildEvaluationContext(changeSet, eventType));
+}
+
+const TRANSITION_OPERATORS = new Set([
+  'any_change',
+  'changed_to',
+  'changed_from',
+  'changed_from_to',
+  'event_type_created',
+]);
+
+/** Whether some currently-true transition condition is part of what satisfies `node`. */
+function matchedThroughTransition(node, context) {
+  if (!node) return false;
+  if (node.type === 'condition') {
+    return TRANSITION_OPERATORS.has(node.operator) && evaluateCondition(node, context);
+  }
+  if (node.type === 'group') {
+    if (node.operator === 'OR') return node.children.some((child) => matchedThroughTransition(child, context));
+    return (
+      node.children.every((child) => evaluateConditionTree(child, context)) &&
+      node.children.some((child) => matchedThroughTransition(child, context))
+    );
+  }
+  return false;
 }
