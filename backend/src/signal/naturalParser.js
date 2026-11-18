@@ -110,7 +110,7 @@ export const DEFAULT_FORM_ALIASES = [
     // the official name. "щодо" is required in front of "військовослужбовц..."
     // because that word is also a rank: "довідка на військовослужбовця Іванова"
     // introduces a person, not this certificate.
-    pattern: /(?:довідк\S*\s+щодо\s+(?:військовослужбовц\S*|в\s*\/\s*с)|(?:довідк\S*\s+)?(?:в\s*\/\s*с\s*)?\(?\s*замість\s+в\.?\s*к\.?\s*\)?)/giu,
+    pattern: /(?:довідк\S*\s+щодо\s+(?:військовослужбовц\S*|в\s*\/\s*с)|(?:довідк\S*\s+)?(?:в\s*\/\s*с\s*)?\(?\s*замість\s+в\s*[./]?\s*к\.?\s*\)?)/giu,
   },
 ];
 

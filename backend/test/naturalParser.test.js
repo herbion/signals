@@ -123,6 +123,12 @@ test('two forms joined by "та"', () => {
   ]);
 });
 
+test('"замість в/к" with a header line and a tab-separated rank is a request', () => {
+  assert.deepEqual(shape('Потрібно довідки замість в/к на:\nсолдат\tПетрін Андрій Олександрович'), [
+    { person: 'солдат Петрін Андрій Олександрович', forms: ['Довідка щодо військовослужбовця'] },
+  ]);
+});
+
 test('"і" separates two requests on one line just as a comma does', () => {
   // Real traffic: no comma or semicolon at all, just the conjunction --
   // joining by line alone used to hand both people both forms.
@@ -201,6 +207,8 @@ test('the same form asked for twice is one form for that person', () => {
 test('the named form is recognised however much of it is written', () => {
   const spellings = [
     'Довідка в/с (замість ВК)', 'довідка замість ВК', 'замість вк',
+    // A slash or dot between the letters is just as common.
+    'довідки замість в/к', 'замість в.к.',
     // The name OpenProject itself uses, which is what every spelling files as.
     'Довідка щодо військовослужбовця', 'потрібна довідку щодо в/с',
   ];
