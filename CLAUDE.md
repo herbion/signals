@@ -277,8 +277,13 @@ webhook for that work package -- attachment uploads, description edits,
 assignee changes -- because "status **is** Нова" stays true for as long as
 the ticket sits in Нова. This was a real bug in production: one ticket sent
 four identical messages. Transition conditions (`changed_to`, `any_change`,
-`event_type_created`) are inherently false against the prior state, so this
-never suppresses them; it only converts "while X" into "when it becomes X".
+`event_type_created`) are inherently false against the prior state, but that
+alone did not protect them: in "type is Запит AND (status is Нова **OR**
+assignee changed)" the OR was already true through status, so reassigning a
+ticket that sat in Нова was silently suppressed. A match that a transition
+happening *now* takes part in is therefore never treated as a repeat
+(`matchedThroughTransition`); only matches built from state conditions alone
+are. The net effect is "while X" becomes "when it becomes X".
 Leaving and re-entering a state fires again, which is intended.
 
 Stored as JSON in `rules.condition_tree`, root is always a `ConditionGroup`.

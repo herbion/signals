@@ -30,7 +30,7 @@ export async function processChangeEvent(db, { snapshot, changeSet, eventType })
     // matching state, not for every webhook it receives while sitting in it.
     // Without this, a rule like "type is X AND status is Y" re-sends on
     // every later attachment/description/assignee edit.
-    if (ruleAlreadyMatched(rule.conditionTree, changeSet)) continue;
+    if (ruleAlreadyMatched(rule.conditionTree, changeSet, eventType)) continue;
 
     const content = renderTemplate(rule.message_template, templateContext);
 
