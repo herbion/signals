@@ -34,7 +34,7 @@ function snapshot(overrides = {}) {
 /** Would this rule actually send for this processed webhook? */
 function wouldSend(rule, result) {
   const matchesNow = evaluateConditionTree(rule, buildEvaluationContext(result.changeSet, result.eventType));
-  return matchesNow && !ruleAlreadyMatched(rule, result.changeSet);
+  return matchesNow && !ruleAlreadyMatched(rule, result.changeSet, result.eventType);
 }
 
 test('a state-only rule fires once on creation, not again on later edits', () => {
@@ -134,4 +134,62 @@ test('a created-event rule still fires exactly once', () => {
     snapshot({ action: 'work_package:updated', updatedAt: '2026-08-13T13:00:00Z' })
   );
   assert.equal(wouldSend(rule, later), false);
+});
+
+// The live "🔍 Notify assignee" rule: a state branch and a transition branch
+// under one OR. Reassigning a ticket that was already Нова used to be
+// suppressed -- the OR was "already true" through status alone, so the
+// assignee change never reached anyone.
+const NOTIFY_ASSIGNEE_RULE = {
+  type: 'group',
+  operator: 'AND',
+  children: [
+    { type: 'condition', field: 'type', operator: 'equals', value: '9' },
+    {
+      type: 'group',
+      operator: 'OR',
+      children: [
+        { type: 'condition', field: 'status', operator: 'equals', value: '15' },
+        { type: 'condition', field: 'assignee', operator: 'any_change', value: '' },
+      ],
+    },
+  ],
+};
+
+function request(overrides = {}) {
+  return snapshot({ type: { id: 9, name: 'Запит' }, status: { id: 15, name: 'Нова' }, ...overrides });
+}
+
+test('a transition condition fires even when a sibling OR branch was already true', () => {
+  const db = createTestDb();
+
+  const created = processWebhookEvent(db, request({ assignee: { id: 7, name: 'Андрій' } }));
+  assert.equal(wouldSend(NOTIFY_ASSIGNEE_RULE, created), true, 'assignee set at creation is notified');
+
+  const reassigned = processWebhookEvent(
+    db,
+    request({ action: 'work_package:updated', assignee: { id: 8, name: 'Ярослав' }, updatedAt: '2026-08-13T09:00:00Z' })
+  );
+  assert.equal(wouldSend(NOTIFY_ASSIGNEE_RULE, reassigned), true, 'reassignment while still Нова is notified');
+
+  const edited = processWebhookEvent(
+    db,
+    request({ action: 'work_package:updated', assignee: { id: 8, name: 'Ярослав' }, subject: 'x', updatedAt: '2026-08-13T10:00:00Z' })
+  );
+  assert.equal(wouldSend(NOTIFY_ASSIGNEE_RULE, edited), false, 'an unrelated edit still does not re-notify');
+});
+
+test('a created-event OR branch is not suppressed by a state branch true of the empty prior state', () => {
+  // `is_empty` is true of "nothing" -- the prior state of a brand-new ticket.
+  const rule = {
+    type: 'group',
+    operator: 'OR',
+    children: [
+      { type: 'condition', operator: 'event_type_created' },
+      { type: 'condition', field: 'assignee', operator: 'is_empty' },
+    ],
+  };
+  const db = createTestDb();
+  const created = processWebhookEvent(db, snapshot());
+  assert.equal(wouldSend(rule, created), true);
 });
