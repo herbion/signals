@@ -233,18 +233,43 @@ function contactFromUser(db, label, person) {
 function contactFromCustomField(db, key, snapshot) {
   const value = snapshot?.customFields?.[key];
 
-  // A User-typed custom field normalizes to { id, name } -- an OpenProject
-  // user, so try the exact join first. An option-typed field has the same
-  // shape but its id is an option id, which simply finds no contact and
-  // falls through to the name.
+  // `kind` comes from the link's href (payloadNormalizer). User ids and
+  // option ids are separate, overlapping number spaces, so an option id must
+  // never be looked up as a user: option 57 would find whoever is user 57.
   if (value && typeof value === 'object') {
-    if (value.id != null) {
-      const byUser = contactsRepo.getByOpenProjectUserId(db, value.id);
-      if (byUser) return byUser;
-    }
-    return contactByName(db, key, value.name);
+    if (value.kind === 'user') return contactFromUser(db, key, value);
+    return contactByClassification(db, key, value);
   }
   return contactByName(db, key, value);
+}
+
+/**
+ * A list/hierarchy option ("👤Замовник" = "1МБ - Бік Андрій") reaches a
+ * person through the contact classification: the contact whose
+ * `field_values[key]` holds that option id (Contacts screen, the same values
+ * inbound tickets read with `sender_contact`). Several different people
+ * classified with one option is an error naming them, not a pick.
+ */
+function contactByClassification(db, key, value) {
+  const label = value.name ? `"${value.name}"` : `option ${value.id}`;
+  if (value.id == null || String(value.id).includes(',')) {
+    throw new Error(`Cannot notify by ${key}: ${label} is not a single option`);
+  }
+  const people = new Map();
+  for (const contact of contactsRepo.listAll(db)) {
+    if (contact.type === 'group' || !contact.signal_identifier) continue;
+    if (String(contact.field_values?.[key] ?? '') !== String(value.id)) continue;
+    if (!people.has(contact.signal_identifier)) people.set(contact.signal_identifier, contact);
+  }
+  if (people.size === 1) return [...people.values()][0];
+  if (people.size === 0) {
+    throw new Error(
+      `No contact is classified with ${key} = ${label} (option ${value.id}). ` +
+        'Set it on the right contact in Contacts.'
+    );
+  }
+  const names = [...people.values()].map((c) => `"${c.name}"`).join(', ');
+  throw new Error(`${key} = ${label} is set on more than one contact (${names}) — not guessing`);
 }
 
 function contactByName(db, key, name) {

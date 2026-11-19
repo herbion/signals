@@ -315,9 +315,15 @@ fixed number. `rules.action_recipient_mode` is one of:
 - `dynamic` -- resolve `action_recipient_dynamic_relation` against the
   incoming snapshot. `author` / `assignee` look up the contact whose
   `openproject_user_id` matches that person's id. A `customFieldNN` key reads
-  that custom field instead: a User-typed field takes the same
-  `openproject_user_id` join, and a **text** field is matched against
-  **contact names** (`contacts/contactNameMatch.js`).
+  that custom field instead, by its normalized `kind` (see payload quirks):
+  a `user` link takes the same `openproject_user_id` join; an `option` link
+  ("👤Замовник", `customField19`) finds the contact whose
+  `field_values[key]` holds that option id -- the classification the Contacts
+  screen records and inbound tickets read with `sender_contact`; a **text**
+  field is matched against **contact names** (`contacts/contactNameMatch.js`).
+  An option id is never looked up as a user id: the two id spaces overlap, so
+  option 57 would otherwise notify whoever happens to be user 57. No match, or
+  several different people, is an error -- never a pick.
 - `contact` -- a fixed `action_recipient_contact_id`.
 - `raw` -- a literal number/group id.
 
@@ -326,11 +332,16 @@ null) when resolution fails, and `processChangeEvent` writes that message
 into `message_log.error_message` -- so "the author has no contact / no phone"
 is visible in the dashboard instead of a silent no-op.
 
-**Matching a person by name** exists for "🎯На кого" (`customField21` on
-Довідка): a String holding the ПІБ the certificate is for, filled from
-`{person}` by the natural-language parser. It is not an OpenProject user and
-carries no phone, so a contact's name is the only way to reach a Signal
-number. A wrong match sends someone else's certificate news to a real
+The "✅ Довідка - Здано" rule notifies by **👤Замовник** (`customField19`),
+the requester, and uses "🎯На кого" (`customField21`, the ПІБ of the soldier
+the certificate is *for*) only in the message text: `✅ Ваша довідка
+{customField1} для {customField21} - готова`. Notifying by "🎯На кого" was
+tried first and is the wrong person: a dry run against 1,965 cached Довідки
+matched a contact twice, because the soldiers named there are almost never
+contacts.
+
+**Matching a person by name** remains for text fields generally. A wrong
+match sends someone else's news to a real person. A wrong match sends someone else's certificate news to a real
 person, so `matchContactByName` is strict: every word of the contact's name
 must be in the field (any order, case and apostrophe variants folded, rank
 words ignored on both sides), a one-word contact name never matches, an
@@ -384,11 +395,21 @@ version, so detecting from real user payloads is the reliable path.
   title, no id) -- depends on OpenProject version/config.
   `webhooks/payloadNormalizer.js`'s `pickRelation` handles both, falling
   back to extracting the id from the href when only a link is present.
-- Custom fields appear as top-level `customFieldNN` keys on the work
-  package resource; the normalizer extracts anything matching
-  `/^customField\d+$/` into `snapshot.customFields`, and the diff engine
-  further prefixes them as `customField:customFieldNN` in the ChangeSet so
-  they don't collide with built-in field names.
+- Custom fields appear in **two places**. Plain values (text, number, date)
+  are top-level `customFieldNN` keys; anything pointing at another resource --
+  a list option (`/api/v3/custom_options/2`), a hierarchy item
+  (`/api/v3/custom_field_items/57`) or a user -- appears **only** under
+  `_links.customFieldNN`, a single link or, for a multi-select, an **array**
+  ("🌀Тип довідки" is `[{ title: "Форма 6", href }]`). The normalizer
+  originally read top-level keys only, so 👤Замовник and Тип довідки were
+  silently missing from every snapshot until this was fixed. Link values
+  normalize to `{ id, name, kind: 'user' | 'option' }` (several values join
+  with ", "); `_links.customFields` (singular page link, no digits) is not a
+  field. Everything lands in `snapshot.customFields`, and the diff engine
+  prefixes them as `customField:customFieldNN` in the ChangeSet so they don't
+  collide with built-in field names. Because cached snapshots predate this,
+  the first webhook per work package after the change diffs those fields
+  from null -- harmless while no rule watches them with `any_change`.
 - API v3 auth is HTTP Basic with the literal username `apikey` and the
   personal access token as the password (`openproject/openprojectClient.js`).
 - A **numeric** user custom field comes back as a JSON number, not a string

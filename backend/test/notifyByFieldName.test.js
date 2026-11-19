@@ -5,6 +5,8 @@ import { processChangeEvent, resolveRecipient, isDynamicRelation } from '../src/
 import { processWebhookEvent } from '../src/diff/diffEngine.js';
 import * as rulesRepo from '../src/rules/rules.repository.js';
 import { dispatchDueBatches, findDueRecipients } from '../src/signal/outboundDispatcher.js';
+import { normalizeWebhookPayload } from '../src/webhooks/payloadNormalizer.js';
+import { buildTemplateContext, renderTemplate } from '../src/rules/templateRenderer.js';
 import { createTestDb } from './testDb.js';
 
 // ------------------------------------------------------------ name matching
@@ -108,7 +110,7 @@ test('a user-typed custom field resolves through the synced OpenProject user', (
   const db = setup();
   addContact(db, { name: 'Somebody Else', number: '+380509998877', openprojectUserId: 42 });
   const rule = { action_recipient_mode: 'dynamic', action_recipient_dynamic_relation: 'customField30' };
-  const snapshot = { id: 1, customFields: { customField30: { id: 42, name: 'Іванов Іван' } } };
+  const snapshot = { id: 1, customFields: { customField30: { id: 42, name: 'Іванов Іван', kind: 'user' } } };
   assert.equal(resolveRecipient(db, rule, snapshot), '+380509998877');
 });
 
@@ -485,4 +487,139 @@ test('a message due sooner for the same person takes the longer-window ones alon
   assert.equal(sends.length, 1);
   assert.match(sends[0].body.message, /2 updates/);
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM message_log WHERE status = 'pending'").get().n, 0);
+});
+
+// ------------------------------------------- link-type custom fields (Замовник)
+
+/** Trimmed from a real Довідка (GET /api/v3/work_packages/4182). */
+const REAL_DOVIDKA = {
+  action: 'work_package:updated',
+  work_package: {
+    id: 4182,
+    subject: 'Довідка',
+    customField21: 'ЧИЧУК Ярослав Олегович',
+    createdAt: '2026-11-01T08:00:00Z',
+    updatedAt: '2026-11-19T09:00:00Z',
+    _links: {
+      self: { href: '/api/v3/work_packages/4182' },
+      type: { href: '/api/v3/types/8', title: 'Довідка' },
+      status: { href: '/api/v3/statuses/29', title: 'Здано ✅' },
+      customFields: { href: '/projects/personnel/settings/custom_fields', type: 'text/html', title: 'Custom fields' },
+      customField1: [{ title: 'Форма 6', href: '/api/v3/custom_options/2' }],
+      customField19: { title: '1МБ - Бік Андрій', href: '/api/v3/custom_field_items/57' },
+      customField30: { title: 'Максим Синявський', href: '/api/v3/users/13' },
+      customField31: { href: null },
+    },
+  },
+};
+
+test('link-only custom fields reach the snapshot, typed as option or user', () => {
+  const snapshot = normalizeWebhookPayload(REAL_DOVIDKA);
+  assert.deepEqual(snapshot.customFields, {
+    customField21: 'ЧИЧУК Ярослав Олегович',
+    customField1: { id: 2, name: 'Форма 6', kind: 'option' },
+    customField19: { id: 57, name: '1МБ - Бік Андрій', kind: 'option' },
+    customField30: { id: 13, name: 'Максим Синявський', kind: 'user' },
+    customField31: null,
+  });
+  assert.equal('customFields' in snapshot.customFields, false, 'the settings-page link is not a field');
+});
+
+test('a multi-select with several values keeps all of them', () => {
+  const payload = structuredClone(REAL_DOVIDKA);
+  payload.work_package._links.customField1.push({ title: 'Форма 5', href: '/api/v3/custom_options/3' });
+  assert.deepEqual(normalizeWebhookPayload(payload).customFields.customField1, {
+    id: '2,3',
+    name: 'Форма 6, Форма 5',
+    kind: 'option',
+  });
+});
+
+test('the ready message renders Тип довідки and На кого by name', () => {
+  const snapshot = normalizeWebhookPayload(REAL_DOVIDKA);
+  const context = buildTemplateContext(snapshot, []);
+  assert.equal(
+    renderTemplate('✅ Ваша довідка {customField1} для {customField21} - готова', context),
+    '✅ Ваша довідка Форма 6 для ЧИЧУК Ярослав Олегович - готова'
+  );
+});
+
+function classify(db, number, fieldValues) {
+  db.prepare('UPDATE contacts SET field_values = ? WHERE signal_identifier = ?').run(JSON.stringify(fieldValues), number);
+}
+
+const zamovnykRule = { action_recipient_mode: 'dynamic', action_recipient_dynamic_relation: 'customField19' };
+const zamovnyk = (id, name = '1МБ - Бік Андрій') => ({
+  id: 4182,
+  customFields: { customField19: { id, name, kind: 'option' } },
+});
+
+test('an option field resolves to the contact classified with that option', () => {
+  const db = setup();
+  addContact(db, { name: '1МБ - Бік Андрій', number: '+380501112233' });
+  addContact(db, { name: '2МБ - Пишний Василь', number: '+380504445566' });
+  classify(db, '+380501112233', { customField19: '57' });
+  classify(db, '+380504445566', { customField19: '17' });
+  assert.equal(resolveRecipient(db, zamovnykRule, zamovnyk(57)), '+380501112233');
+});
+
+test('an option id is never looked up as an OpenProject user id', () => {
+  const db = setup();
+  // User 57 exists as a contact, but option 57 is somebody else's Замовник.
+  addContact(db, { name: 'Unrelated user', number: '+380507770000', openprojectUserId: 57 });
+  assert.throws(() => resolveRecipient(db, zamovnykRule, zamovnyk(57)), /No contact is classified with customField19/);
+});
+
+test('an option nobody is classified with explains how to fix it', () => {
+  const db = setup();
+  assert.throws(
+    () => resolveRecipient(db, zamovnykRule, zamovnyk(57, 'Запит')),
+    /customField19 = "Запит" \(option 57\)\. Set it on the right contact/
+  );
+});
+
+test('two different people classified with one option is an error, not a pick', () => {
+  const db = setup();
+  addContact(db, { name: 'A', number: '+380501112233' });
+  addContact(db, { name: 'B', number: '+380504445566' });
+  classify(db, '+380501112233', { customField19: 57 });
+  classify(db, '+380504445566', { customField19: '57' });
+  assert.throws(() => resolveRecipient(db, zamovnykRule, zamovnyk(57)), /more than one contact \("A", "B"\)/);
+});
+
+test('the Замовник rule end to end: real payload in, requester notified, comment back', async (t) => {
+  const calls = captureFetch();
+  t.after(() => mock.restoreAll());
+
+  const db = setup();
+  addContact(db, { name: '1МБ - Бік Андрій', number: '+380501112233' });
+  classify(db, '+380501112233', { customField19: '57' });
+  rulesRepo.create(db, {
+    name: '✅ Довідка - Здано',
+    enabled: true,
+    conditionTree: {
+      type: 'group',
+      operator: 'AND',
+      children: [
+        { type: 'condition', field: 'type', operator: 'equals', value: 8 },
+        { type: 'condition', field: 'status', operator: 'changed_to', value: 29 },
+      ],
+    },
+    actionRecipientMode: 'dynamic',
+    actionRecipientDynamicRelation: 'customField19',
+    messageTemplate: '✅ Ваша довідка {customField1} для {customField21} - готова',
+    commentTemplate: 'Повідомлено в Signal: {recipient_name}',
+  });
+
+  const before = structuredClone(REAL_DOVIDKA);
+  before.work_package._links.status = { href: '/api/v3/statuses/15', title: 'Нова' };
+  before.work_package.updatedAt = '2026-11-19T08:00:00Z';
+  processWebhookEvent(db, normalizeWebhookPayload(before));
+  const result = processWebhookEvent(db, normalizeWebhookPayload(REAL_DOVIDKA));
+  await processChangeEvent(db, result);
+
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0].body.recipients, ['+380501112233']);
+  assert.equal(calls[0].body.message, '✅ Ваша довідка Форма 6 для ЧИЧУК Ярослав Олегович - готова');
+  assert.deepEqual(calls[1].body, { comment: { raw: 'Повідомлено в Signal: 1МБ - Бік Андрій' } });
 });

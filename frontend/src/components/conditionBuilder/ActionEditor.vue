@@ -132,7 +132,7 @@ function insertFormat({ markup, sample }) {
       <select :value="relationKind" @change="onRelationChange">
         <option value="author">Author (who created the work package)</option>
         <option value="assignee">Assignee</option>
-        <option value="customField">A person named in a custom field (e.g. 🎯На кого)</option>
+        <option value="customField">The person in a custom field (e.g. 👤Замовник)</option>
       </select>
       <template v-if="relationKind === 'customField'">
         <div class="cf-row">
@@ -144,14 +144,14 @@ function insertFormat({ markup, sample }) {
             <option value="" disabled>Choose a custom field&hellip;</option>
             <option v-for="cf in customFieldOptions" :key="cf.key" :value="cf.key">{{ cf.name }} ({{ cf.key }})</option>
           </select>
-          <input placeholder="customField21" :value="customFieldKey" @input="onCustomFieldKeyInput($event.target.value)" />
+          <input placeholder="customField19" :value="customFieldKey" @input="onCustomFieldKeyInput($event.target.value)" />
         </div>
         <p class="hint">
-          The field's value (a ПІБ such as &ldquo;Іванов Іван Іванович&rdquo;) is matched against
-          <strong>contact names</strong>: every word of a contact's name must appear in it, in any order, ranks ignored.
-          A one-word contact name never matches, and two matching contacts is an error rather than a guess &mdash;
-          either way the message is logged as failed with the reason. A user-typed field is matched to the synced
-          OpenProject user instead.
+          How the field's value finds a contact depends on its type. A <strong>dropdown</strong> (e.g. 👤Замовник):
+          the contact whose classification on the Contacts screen holds that option. A <strong>user</strong> field:
+          the synced OpenProject user. A <strong>text</strong> field (a ПІБ): the contact whose name's words all appear
+          in it, ranks ignored. No match, or more than one person, is logged as failed with the reason &mdash; never a
+          guess.
         </p>
       </template>
       <p v-else class="hint">

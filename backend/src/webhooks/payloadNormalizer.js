@@ -49,12 +49,48 @@ function idFromHref(href) {
   return match ? Number(match[1]) : null;
 }
 
+const CUSTOM_FIELD_KEY = /^customField\d+$/;
+
+/**
+ * Custom fields come in two places. Plain values (text, number, date) are
+ * top-level properties; anything that points at another resource -- a list
+ * option (`/api/v3/custom_options/2`), a hierarchy item
+ * (`/api/v3/custom_field_items/57`, e.g. "👤Замовник") or a user -- appears
+ * **only** under `_links`, as one link or, for a multi-select, an array of
+ * them ("🌀Тип довідки" is `[{ title: "Форма 6", href: ... }]`). Reading only
+ * top-level keys silently dropped every one of those for months.
+ *
+ * Link values normalize to `{ id, name, kind }`; `kind` says whether the id is
+ * an OpenProject user or a list option, because the two id spaces overlap and
+ * mistaking one for the other would notify an unrelated person. A
+ * multi-select with several values joins ids and names with ", ".
+ */
 function extractCustomFields(wp, embedded, links) {
   const result = {};
   for (const key of Object.keys(wp)) {
-    if (!/^customField\d+$/.test(key)) continue;
+    if (!CUSTOM_FIELD_KEY.test(key)) continue;
     const relational = pickRelation(embedded[key], links[key]);
     result[key] = relational ?? wp[key] ?? null;
   }
+  for (const key of Object.keys(links)) {
+    if (!CUSTOM_FIELD_KEY.test(key) || key in result) continue;
+    result[key] = linkedCustomFieldValue(links[key]);
+  }
   return result;
+}
+
+function linkedCustomFieldValue(link) {
+  const items = (Array.isArray(link) ? link : [link]).filter((item) => item && (item.href || item.title));
+  if (items.length === 0) return null;
+  const values = items.map((item) => ({
+    id: idFromHref(item.href),
+    name: item.title ?? null,
+    kind: /\/users\/\d+$/.test(item.href ?? '') ? 'user' : 'option',
+  }));
+  if (values.length === 1) return values[0];
+  return {
+    id: values.map((v) => v.id).join(','),
+    name: values.map((v) => v.name).join(', '),
+    kind: values[0].kind,
+  };
 }
