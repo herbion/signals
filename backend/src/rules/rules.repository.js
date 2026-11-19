@@ -43,6 +43,7 @@ function rowToRule(row) {
     ...row,
     enabled: Boolean(row.enabled),
     conditionTree: JSON.parse(row.condition_tree),
+    allowed_contact_ids: parseContactIds(row.allowed_contact_ids),
   };
 }
 
@@ -65,9 +66,9 @@ export function create(db, rule) {
       `INSERT INTO rules
          (name, enabled, project_scope, condition_tree, action_recipient_mode,
           action_recipient_contact_id, action_recipient_raw, action_recipient_dynamic_relation,
-          message_template, priority)
+          message_template, comment_template, allowed_contact_ids, priority)
        VALUES (@name, @enabled, @projectScope, @conditionTree, @recipientMode,
-               @contactId, @recipientRaw, @dynamicRelation, @messageTemplate, @priority)`
+               @contactId, @recipientRaw, @dynamicRelation, @messageTemplate, @commentTemplate, @allowedContactIds, @priority)`
     )
     .run({
       name: rule.name,
@@ -79,6 +80,8 @@ export function create(db, rule) {
       recipientRaw: rule.actionRecipientRaw ?? null,
       dynamicRelation: rule.actionRecipientDynamicRelation ?? null,
       messageTemplate: rule.messageTemplate,
+      commentTemplate: blankToNull(rule.commentTemplate),
+      allowedContactIds: serializeContactIds(rule.allowedContactIds),
       priority: rule.priority ?? 0,
     });
   return getById(db, info.lastInsertRowid);
@@ -97,6 +100,8 @@ export function update(db, id, rule) {
        action_recipient_raw = @recipientRaw,
        action_recipient_dynamic_relation = @dynamicRelation,
        message_template = @messageTemplate,
+       comment_template = @commentTemplate,
+       allowed_contact_ids = @allowedContactIds,
        priority = @priority,
        updated_at = datetime('now')
      WHERE id = @id`
@@ -111,9 +116,40 @@ export function update(db, id, rule) {
     recipientRaw: rule.actionRecipientRaw ?? null,
     dynamicRelation: rule.actionRecipientDynamicRelation ?? null,
     messageTemplate: rule.messageTemplate,
+    commentTemplate: blankToNull(rule.commentTemplate),
+      allowedContactIds: serializeContactIds(rule.allowedContactIds),
     priority: rule.priority ?? 0,
   });
   return getById(db, id);
+}
+
+/**
+ * `allowed_contact_ids` is a JSON array of contact ids; NULL or [] means the
+ * rule may message anyone. A malformed blob reads as "no limit" -- it can only
+ * have been written by hand, and failing every send of the rule over it would
+ * be harder to notice than the limit being off.
+ */
+export function parseContactIds(value) {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? normalizeContactIds(parsed) : [];
+  } catch {
+    return [];
+  }
+}
+
+function serializeContactIds(ids) {
+  const normalized = normalizeContactIds(ids ?? []);
+  return normalized.length ? JSON.stringify(normalized) : null;
+}
+
+function normalizeContactIds(ids) {
+  return [...new Set(ids.map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+}
+
+function blankToNull(value) {
+  return value === undefined || value === null || String(value).trim() === '' ? null : String(value);
 }
 
 export function remove(db, id) {

@@ -401,3 +401,26 @@ export async function createWorkPackage(baseUrl, apiKey, { projectId, typeId, fi
   };
 }
 
+
+/**
+ * Adds a comment to a work package's activity, as the API token's user.
+ *
+ * `POST /work_packages/{id}/activities` with `{ comment: { raw } }` is the API
+ * v3 "comment work package" call; the token's user needs the "Add notes"
+ * permission in that project, or this is a 403. The comment itself bumps the
+ * work package's `updatedAt` and so comes back as another webhook -- harmless,
+ * because nothing a rule watches changed in it (see edge triggering).
+ */
+export async function addWorkPackageComment(baseUrl, apiKey, workPackageId, text) {
+  if (!workPackageId) throw new Error('a work package id is required to comment on it');
+  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/api/v3/work_packages/${workPackageId}/activities`, {
+    method: 'POST',
+    headers: { ...authHeader(apiKey), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ comment: { raw: text } }),
+  });
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => '');
+    throw new Error(describeOpenProjectError(response.status, errorBody));
+  }
+  return response.json().catch(() => null);
+}

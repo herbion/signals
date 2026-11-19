@@ -2,6 +2,7 @@ import express from 'express';
 import { getDb } from '../db/connection.js';
 import * as repo from './rules.repository.js';
 import { evaluateConditionTree, buildEvaluationContext } from './ruleEvaluator.js';
+import { isDynamicRelation } from './ruleProcessor.js';
 
 export const rulesRouter = express.Router();
 
@@ -57,13 +58,20 @@ function fromBody(body) {
     actionRecipientRaw,
     actionRecipientDynamicRelation,
     messageTemplate,
+    commentTemplate,
+    allowedContactIds,
     priority,
   } = body ?? {};
   if (!name || !conditionTree || !messageTemplate) {
     throw new Error('name, conditionTree, and messageTemplate are required');
   }
-  if (actionRecipientMode === 'dynamic' && !['author', 'assignee'].includes(actionRecipientDynamicRelation)) {
-    throw new Error('dynamic recipient requires actionRecipientDynamicRelation of "author" or "assignee"');
+  if (actionRecipientMode === 'dynamic' && !isDynamicRelation(actionRecipientDynamicRelation)) {
+    throw new Error(
+      'dynamic recipient requires actionRecipientDynamicRelation of "author", "assignee" or a custom field key like "customField21"'
+    );
+  }
+  if (allowedContactIds != null && !Array.isArray(allowedContactIds)) {
+    throw new Error('allowedContactIds must be an array of contact ids');
   }
   return {
     name,
@@ -75,6 +83,8 @@ function fromBody(body) {
     actionRecipientRaw,
     actionRecipientDynamicRelation,
     messageTemplate,
+    commentTemplate,
+    allowedContactIds,
     priority,
   };
 }

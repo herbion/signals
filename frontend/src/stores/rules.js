@@ -51,6 +51,8 @@ export function ruleToPayload(rule) {
     actionRecipientRaw: rule.action_recipient_raw,
     actionRecipientDynamicRelation: rule.action_recipient_dynamic_relation,
     messageTemplate: rule.message_template,
+    commentTemplate: rule.comment_template,
+    allowedContactIds: rule.allowed_contact_ids ?? [],
     priority: rule.priority,
   };
 }

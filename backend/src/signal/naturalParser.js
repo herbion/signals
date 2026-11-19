@@ -58,7 +58,7 @@ const NOT_A_NAME = new Set([
  * three-word name instead of a name starting at "Сержант". Matched as whole
  * phrases, longest first, so "молодший сержант" doesn't come back as "сержант".
  */
-const RANKS = [
+export const RANKS = [
   'головний майстер-сержант', 'старший майстер-сержант', 'майстер-сержант', 'штаб-сержант',
   'молодший сержант', 'старший сержант', 'головний сержант', 'сержант',
   'старший солдат', 'солдат', 'рядовий', 'старший матрос', 'матрос', 'рекрут', 'курсант',

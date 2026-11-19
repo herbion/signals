@@ -27,6 +27,8 @@ const form = ref({
   action_recipient_raw: '',
   action_recipient_dynamic_relation: 'author',
   message_template: '',
+  comment_template: '',
+  allowed_contact_ids: [],
   priority: 0,
 });
 
@@ -39,6 +41,8 @@ const actionModel = computed({
     actionRecipientRaw: form.value.action_recipient_raw,
     actionRecipientDynamicRelation: form.value.action_recipient_dynamic_relation,
     messageTemplate: form.value.message_template,
+    commentTemplate: form.value.comment_template,
+    allowedContactIds: form.value.allowed_contact_ids ?? [],
   }),
   set: (v) => {
     form.value.action_recipient_mode = v.actionRecipientMode;
@@ -46,6 +50,8 @@ const actionModel = computed({
     form.value.action_recipient_raw = v.actionRecipientRaw;
     form.value.action_recipient_dynamic_relation = v.actionRecipientDynamicRelation;
     form.value.message_template = v.messageTemplate;
+    form.value.comment_template = v.commentTemplate;
+    form.value.allowed_contact_ids = v.allowedContactIds ?? [];
   },
 });
 
@@ -109,7 +115,7 @@ async function save() {
 
     <div class="card" style="margin-bottom: 1rem">
       <label style="margin-bottom: 0.5rem">Action</label>
-      <ActionEditor v-model="actionModel" :contacts="contactsStore.contacts" />
+      <ActionEditor v-model="actionModel" :contacts="contactsStore.contacts" :metadata="metadata" />
     </div>
 
     <div class="actions">

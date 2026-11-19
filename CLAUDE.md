@@ -83,8 +83,10 @@ backend/src/
                  approvals.js (hold an action for human review),
                  inboundActionExecutor.js
   inboundRules/  inboundRules.repository.js, inboundRules.controller.js
-  openproject/   openprojectClient.js (metadata fetch for rule-builder dropdowns)
+  openproject/   openprojectClient.js (metadata fetch for rule-builder dropdowns,
+                 work package create, comment)
   contacts/, messageLog/, settings/, auth/    controller.js + repository.js pairs
+                 (contacts/ also: contactsSync.js, contactNameMatch.js)
   api/router.js  mounts everything under /api, JWT-gated except /auth/login
   index.js       bootstrap: migrations, seed, webhook router (raw body), api
                  router (json body), static frontend, signal receive poller
@@ -302,9 +304,12 @@ manual entry when metadata isn't configured) work identically.
 A rule can notify a *person derived from the work package* rather than a
 fixed number. `rules.action_recipient_mode` is one of:
 
-- `dynamic` -- resolve `action_recipient_dynamic_relation` (`author` or
-  `assignee`) against the incoming snapshot, then look up the contact whose
-  `openproject_user_id` matches that person's id.
+- `dynamic` -- resolve `action_recipient_dynamic_relation` against the
+  incoming snapshot. `author` / `assignee` look up the contact whose
+  `openproject_user_id` matches that person's id. A `customFieldNN` key reads
+  that custom field instead: a User-typed field takes the same
+  `openproject_user_id` join, and a **text** field is matched against
+  **contact names** (`contacts/contactNameMatch.js`).
 - `contact` -- a fixed `action_recipient_contact_id`.
 - `raw` -- a literal number/group id.
 
@@ -312,6 +317,40 @@ fixed number. `rules.action_recipient_mode` is one of:
 null) when resolution fails, and `processChangeEvent` writes that message
 into `message_log.error_message` -- so "the author has no contact / no phone"
 is visible in the dashboard instead of a silent no-op.
+
+**Matching a person by name** exists for "🎯На кого" (`customField21` on
+Довідка): a String holding the ПІБ the certificate is for, filled from
+`{person}` by the natural-language parser. It is not an OpenProject user and
+carries no phone, so a contact's name is the only way to reach a Signal
+number. A wrong match sends someone else's certificate news to a real
+person, so `matchContactByName` is strict: every word of the contact's name
+must be in the field (any order, case and apostrophe variants folded, rank
+words ignored on both sides), a one-word contact name never matches, an
+equal word set beats a merely-contained one, and two people still left is
+an error naming both -- never a pick. Contacts sharing one Signal number
+count as one person. Initials ("Іванов І.І.") deliberately do not match.
+
+**Commenting back** (`rules.comment_template`, migration `019`): after a
+rule's Signal message is sent -- or queued, with grouping on -- the rendered
+template is posted to `POST /api/v3/work_packages/{id}/activities`
+(`addWorkPackageComment`). Not after a failed, muted or unresolved send: the
+comment claims the person was notified. Its own failure is logged as a
+separate `message_log` row (recipient `OpenProject #id`) and never marks the
+notification failed. The API user needs "Add notes" in the project. The
+comment comes back as another webhook, which is harmless: no condition-relevant
+field changed, so edge triggering keeps the rule quiet. With grouping on, the
+comment goes out before the dispatcher actually sends, so in the rare case
+the batch later fails, the comment is ahead of reality. `{recipient_name}`
+(the resolved contact's name) is available to both templates.
+
+**"Only these contacts"** (`rules.allowed_contact_ids`, also migration `019`)
+is a per-rule limit for trying a rule on real work packages while only test
+contacts can be messaged. NULL / `[]` means anyone. It is checked *after*
+resolution, against the allowed contacts' signal identifiers, so a missing or
+ambiguous name is still reported as such; a recipient outside the list is
+logged `muted` with the reason in `error_message` (deliberately suppressed,
+not a failure) and gets no comment. The repository hands it out parsed as a
+number array.
 
 The `openproject_user_id` links are populated by **contact sync**
 (`contacts/contactsSync.js`, `POST /api/contacts/sync`): it fetches
