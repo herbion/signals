@@ -27,6 +27,10 @@ const PATHS = {
   inbox:
     '<path d="M21.5 12.5h-5l-1.5 3h-6l-1.5-3h-5"/><path d="M5.9 4.7 2.5 12.5v5a2 2 0 0 0 2 2h15a2 2 0 0 0 2-2v-5l-3.4-7.8a2 2 0 0 0-1.8-1.2H7.7a2 2 0 0 0-1.8 1.2z"/>',
   bolt: '<path d="M13 2 4.5 12.5a1 1 0 0 0 .8 1.6H11l-1 7.9 8.5-10.5a1 1 0 0 0-.8-1.6H12z"/>',
+  'chevron-down': '<path d="m6 9 6 6 6-6"/>',
+  'chevron-right': '<path d="m9 6 6 6-6 6"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20.5 20.5-4.5-4.5"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
 };
 </script>
 

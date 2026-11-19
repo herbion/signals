@@ -14,12 +14,21 @@ import {
 } from '../stores/inboundRules.js';
 import { useContactsStore } from '../stores/contacts.js';
 import FieldMappingEditor from '../components/FieldMappingEditor.vue';
+import TreeSelect from '../components/TreeSelect.vue';
 import { useSettingsStore } from '../stores/settings.js';
 
 const props = defineProps({ id: { type: [String, Number], default: null } });
 const router = useRouter();
 const store = useInboundRulesStore();
 const contactsStore = useContactsStore();
+// The number goes into the label so a contact can be found by it too; group
+// ids are long base64 and only clutter the list.
+const contactOptions = computed(() =>
+  contactsStore.contacts.map((c) => ({
+    id: String(c.id),
+    label: c.type === 'group' ? `${c.name} (group)` : `${c.name} · ${c.signal_identifier}`,
+  }))
+);
 const settingsStore = useSettingsStore();
 
 const isNew = computed(() => !props.id);
@@ -621,10 +630,12 @@ async function save() {
           </div>
           <div v-if="action.replyTarget === 'contact'" class="field">
             <label>Contact</label>
-            <select v-model="action.replyContactId">
-              <option value="">Select…</option>
-              <option v-for="c in contactsStore.contacts" :key="c.id" :value="c.id">{{ c.name }}</option>
-            </select>
+            <TreeSelect
+              v-model="action.replyContactId"
+              :options="contactOptions"
+              empty-label="Select…"
+              search-placeholder="Search contacts…"
+            />
           </div>
           <div v-if="action.replyTarget === 'raw'" class="field">
             <label>Number or group id</label>

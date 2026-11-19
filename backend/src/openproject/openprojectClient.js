@@ -167,7 +167,7 @@ export async function fetchTypeSchema(baseUrl, apiKey, projectId, typeId, payloa
     const embedded = definition._embedded?.allowedValues;
     const href = definition._links?.allowedValues?.href;
     if (Array.isArray(embedded)) {
-      allowedValues = embedded.map(toAllowedValue);
+      allowedValues = toAllowedValues(embedded);
     } else if (href) {
       allowedValues = await fetchAllowedValues(base, apiKey, href);
     }
@@ -195,13 +195,43 @@ export async function fetchTypeSchema(baseUrl, apiKey, projectId, typeId, payloa
   return { projectId: Number(projectId), typeId: Number(typeId), fields, validationErrors };
 }
 
+/**
+ * One entry of a field's closed list. Hierarchy items (`/custom_fields/N/items`)
+ * also carry where they sit in the tree -- `depth` and the parent's id -- so a
+ * picker can show "БАР › Береза Андрій" instead of 60 flat names.
+ */
 function toAllowedValue(element) {
   const href = element?._links?.self?.href ?? null;
-  return {
+  const parentHref = element?._links?.parent?.href ?? null;
+  const value = {
     href,
     id: element?.id ?? (href ? Number(href.split('/').pop()) : null),
-    label: element?.value ?? element?.name ?? element?.label ?? String(element?.id ?? ''),
+    // Labels are typed by hand in OpenProject and sometimes keep a stray
+    // leading space (" Гела Мар'яна").
+    label: String(element?.value ?? element?.name ?? element?.label ?? element?.id ?? '').trim(),
   };
+  if (element?._type === 'HierarchyItem') {
+    value.depth = Number.isInteger(element.depth) ? element.depth : 0;
+    value.parentId = parentHref ? Number(parentHref.split('/').pop()) : null;
+  }
+  return value;
+}
+
+/**
+ * A hierarchy's collection starts with its root item -- no label, no parent,
+ * depth null. It is the container, not a choice, and shown as an option it is
+ * just its own id ("5").
+ */
+function isHierarchyRoot(element) {
+  return element?._type === 'HierarchyItem' && element.label == null && !element._links?.parent?.href;
+}
+
+function toAllowedValues(elements) {
+  const values = elements.filter((element) => !isHierarchyRoot(element)).map(toAllowedValue);
+  // Top-level items point at the root we just dropped.
+  const ids = new Set(values.map((v) => v.id));
+  for (const v of values) if (v.parentId != null && !ids.has(v.parentId)) v.parentId = null;
+  return values;
 }
 
 async function fetchAllowedValues(base, apiKey, href) {
@@ -210,7 +240,7 @@ async function fetchAllowedValues(base, apiKey, href) {
     if (!response.ok) return null;
     const body = await response.json();
     const elements = body._embedded?.elements ?? (Array.isArray(body) ? body : []);
-    return elements.map(toAllowedValue);
+    return toAllowedValues(elements);
   } catch {
     return null;
   }

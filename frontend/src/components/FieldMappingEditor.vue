@@ -22,6 +22,7 @@
  * whenever the field itself offers no list.
  */
 import { computed } from 'vue';
+import TreeSelect from './TreeSelect.vue';
 
 const props = defineProps({
   field: { type: Object, required: true },
@@ -104,7 +105,8 @@ const matchFieldDef = computed(() => matchFieldOptions.value.find((f) => f.key =
 function valueOptionsFor(field) {
   if (!field) return null;
   if (Array.isArray(field.allowedValues) && field.allowedValues.length) {
-    return field.allowedValues.map((o) => ({ id: String(o.id), label: o.label }));
+    // Keep depth/parentId so a hierarchy field draws as its tree.
+    return field.allowedValues.map((o) => ({ ...o, id: String(o.id) }));
   }
   if (field.type === 'User') return props.users.map((u) => ({ id: String(u.id), label: u.name }));
   return null;
@@ -162,15 +164,14 @@ function setRuleValuesText(index, text) {
     </select>
 
     <!-- Pick one entry, or a field with no list at all: the old behaviour. -->
-    <select
+    <TreeSelect
       v-if="hasList && current.source === 'value'"
-      :value="current.template"
-      @change="update({ template: $event.target.value })"
-      style="width: 100%"
-    >
-      <option value="">Select…</option>
-      <option v-for="option in options" :key="option.href" :value="String(option.id)">{{ option.label }}</option>
-    </select>
+      class="spaced"
+      :model-value="current.template"
+      :options="options"
+      empty-label="Select…"
+      @update:model-value="update({ template: $event })"
+    />
 
     <input
       v-else-if="current.source === 'template'"
@@ -218,10 +219,14 @@ function setRuleValuesText(index, text) {
             />
           </div>
           <span class="arrow">→</span>
-          <select v-if="targetOptions" :value="rule.value" @change="setRuleValue(index, $event.target.value)">
-            <option value="">Select…</option>
-            <option v-for="opt in targetOptions" :key="opt.id" :value="opt.id">{{ opt.label }}</option>
-          </select>
+          <TreeSelect
+            v-if="targetOptions"
+            class="rule-target"
+            :model-value="rule.value"
+            :options="targetOptions"
+            empty-label="Select…"
+            @update:model-value="setRuleValue(index, $event)"
+          />
           <input
             v-else
             class="mono"
@@ -243,22 +248,25 @@ function setRuleValuesText(index, text) {
 
     <template v-if="hasList">
       <label class="sub">{{ current.source === 'field_match' ? 'Otherwise (no rule above matched)' : 'If that does not match a value in the list' }}</label>
-      <select :value="current.fallback" @change="update({ fallback: $event.target.value })" style="width: 100%">
-        <option value="">{{ current.source === 'field_match' ? 'Leave unset' : 'Fail, and say which field was wrong' }}</option>
-        <option v-for="option in options" :key="option.href" :value="String(option.id)">
-          Use “{{ option.label }}”
-        </option>
-      </select>
+      <TreeSelect
+        :model-value="current.fallback"
+        :options="options"
+        :empty-label="current.source === 'field_match' ? 'Leave unset' : 'Fail, and say which field was wrong'"
+        @update:model-value="update({ fallback: $event })"
+      />
       <p v-if="current.fallback" class="hint">
         What was actually asked for is appended to the ticket description, so the fallback does not hide it.
       </p>
     </template>
     <template v-else-if="current.source === 'field_match'">
       <label class="sub">Otherwise (no rule above matched)</label>
-      <select v-if="targetOptions" :value="current.fallback" @change="update({ fallback: $event.target.value })" style="width: 100%">
-        <option value="">Leave unset</option>
-        <option v-for="opt in targetOptions" :key="opt.id" :value="opt.id">{{ opt.label }}</option>
-      </select>
+      <TreeSelect
+        v-if="targetOptions"
+        :model-value="current.fallback"
+        :options="targetOptions"
+        empty-label="Leave unset"
+        @update:model-value="update({ fallback: $event })"
+      />
       <input
         v-else
         class="mono"
@@ -323,6 +331,13 @@ function setRuleValuesText(index, text) {
 }
 .arrow {
   color: var(--text-muted);
+}
+.spaced {
+  margin-top: 0.35rem;
+}
+.rule-target {
+  width: 240px;
+  max-width: 100%;
 }
 .btn.small {
   font-size: 0.75rem;
