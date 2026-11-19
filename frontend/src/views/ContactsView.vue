@@ -3,6 +3,8 @@ import { onMounted, ref, computed } from 'vue';
 import { useContactsStore } from '../stores/contacts.js';
 import { useInboundRulesStore } from '../stores/inboundRules.js';
 import { useSettingsStore } from '../stores/settings.js';
+import TreeSelect from '../components/TreeSelect.vue';
+import { optionPathLabel } from '../utils/optionTree.js';
 
 const store = useContactsStore();
 const inboundRules = useInboundRulesStore();
@@ -44,8 +46,7 @@ function mappedLabel(contact) {
     .filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== '')
     .map(([key, v]) => {
       const slot = slots.value.find((s) => s.key === key);
-      const option = slot?.allowedValues?.find((o) => String(o.id) === String(v));
-      const label = option?.label ?? v;
+      const label = optionPathLabel(slot?.allowedValues, v) ?? v;
       return slot ? `${slot.name}: ${label}` : label;
     })
     .join(', ');
@@ -230,12 +231,12 @@ async function remove(contact) {
       <h2 style="margin-top: 0">Classify {{ classifying.name }}</h2>
       <div v-for="slot in slots" :key="slot.key" class="field">
         <label>{{ slot.name }}</label>
-        <select v-model="classifying.values[slot.key]" style="width: 100%">
-          <option value="">Not set &mdash; keep asking</option>
-          <option v-for="option in slot.allowedValues ?? []" :key="option.href" :value="String(option.id)">
-            {{ option.label }}
-          </option>
-        </select>
+        <TreeSelect
+          v-model="classifying.values[slot.key]"
+          :options="slot.allowedValues ?? []"
+          empty-label="Not set — keep asking"
+          search-placeholder="Search by name or unit…"
+        />
         <p class="hint" style="margin: 0.15rem 0 0"><code>{{ slot.key }}</code></p>
       </div>
       <div class="actions">
