@@ -66,9 +66,9 @@ export function create(db, rule) {
       `INSERT INTO rules
          (name, enabled, project_scope, condition_tree, action_recipient_mode,
           action_recipient_contact_id, action_recipient_raw, action_recipient_dynamic_relation,
-          message_template, comment_template, allowed_contact_ids, priority)
+          message_template, comment_template, allowed_contact_ids, batch_window_seconds, priority)
        VALUES (@name, @enabled, @projectScope, @conditionTree, @recipientMode,
-               @contactId, @recipientRaw, @dynamicRelation, @messageTemplate, @commentTemplate, @allowedContactIds, @priority)`
+               @contactId, @recipientRaw, @dynamicRelation, @messageTemplate, @commentTemplate, @allowedContactIds, @batchWindowSeconds, @priority)`
     )
     .run({
       name: rule.name,
@@ -82,6 +82,7 @@ export function create(db, rule) {
       messageTemplate: rule.messageTemplate,
       commentTemplate: blankToNull(rule.commentTemplate),
       allowedContactIds: serializeContactIds(rule.allowedContactIds),
+      batchWindowSeconds: normalizeWindow(rule.batchWindowSeconds),
       priority: rule.priority ?? 0,
     });
   return getById(db, info.lastInsertRowid);
@@ -102,6 +103,7 @@ export function update(db, id, rule) {
        message_template = @messageTemplate,
        comment_template = @commentTemplate,
        allowed_contact_ids = @allowedContactIds,
+       batch_window_seconds = @batchWindowSeconds,
        priority = @priority,
        updated_at = datetime('now')
      WHERE id = @id`
@@ -118,6 +120,7 @@ export function update(db, id, rule) {
     messageTemplate: rule.messageTemplate,
     commentTemplate: blankToNull(rule.commentTemplate),
       allowedContactIds: serializeContactIds(rule.allowedContactIds),
+      batchWindowSeconds: normalizeWindow(rule.batchWindowSeconds),
     priority: rule.priority ?? 0,
   });
   return getById(db, id);
@@ -146,6 +149,12 @@ function serializeContactIds(ids) {
 
 function normalizeContactIds(ids) {
   return [...new Set(ids.map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+}
+
+/** Seconds, or null for "use the global grouping window". 0 / blank / junk all mean null. */
+function normalizeWindow(value) {
+  const seconds = Number(value);
+  return value != null && value !== '' && Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds) : null;
 }
 
 function blankToNull(value) {

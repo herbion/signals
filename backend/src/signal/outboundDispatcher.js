@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { sendMessage } from './signalSender.js';
+import { postRuleComment } from '../rules/commentBack.js';
 
 let timer = null;
 const TICK_MS = 5000;
@@ -17,12 +18,15 @@ export function buildBatchMessage(contents, { textMode } = {}) {
 }
 
 /**
- * Recipients whose oldest queued message is older than the grouping window,
- * i.e. whose batch is ready to go out.
+ * Recipients whose batch is ready to go out: some queued message for them has
+ * waited out its window -- the row's own `batch_window_seconds` (copied from
+ * its rule, migration 020) or else the global grouping window. Once one row
+ * is due, everything queued for that person goes with it, so a long-window
+ * rule's messages leave early rather than as a second ping later.
  *
- * The window runs from the FIRST queued message rather than resetting on each
- * new one: a debounce would let a steady stream of edits postpone delivery
- * indefinitely, whereas this caps the delay at grouping_window_seconds.
+ * Each window runs from its row's creation rather than resetting on each new
+ * one: a debounce would let a steady stream of edits postpone delivery
+ * indefinitely, whereas this caps the delay at the window.
  */
 export function findDueRecipients(db, windowSeconds, { now = "datetime('now')" } = {}) {
   return db
@@ -31,7 +35,8 @@ export function findDueRecipients(db, windowSeconds, { now = "datetime('now')" }
        FROM message_log
        WHERE direction = 'outbound' AND status = 'pending' AND batch_id IS NULL AND recipient IS NOT NULL
        GROUP BY recipient
-       HAVING (julianday(${now}) - julianday(MIN(created_at))) * 86400.0 >= @windowSeconds`
+       HAVING MAX((julianday(${now}) - julianday(created_at)) * 86400.0
+                  - COALESCE(batch_window_seconds, @windowSeconds)) >= 0`
     )
     .all({ windowSeconds });
 }
@@ -60,7 +65,10 @@ export async function dispatchDueBatches(db) {
     ).run({ batchId, recipient });
 
     const rows = db
-      .prepare('SELECT id, content FROM message_log WHERE batch_id = ? ORDER BY id ASC').all(batchId);
+      .prepare(
+        'SELECT id, content, rule_id, work_package_id, pending_comment FROM message_log WHERE batch_id = ? ORDER BY id ASC'
+      )
+      .all(batchId);
     if (rows.length === 0) continue;
 
     const message = buildBatchMessage(rows.map((r) => r.content), { textMode: settings.text_mode });
@@ -69,6 +77,7 @@ export async function dispatchDueBatches(db) {
       await sendMessage(db, { recipient, message });
       db.prepare("UPDATE message_log SET status = 'sent' WHERE batch_id = ?").run(batchId);
       messages += rows.length;
+      await postPendingComments(db, rows);
     } catch (err) {
       // Leave batch_id set so the failed grouping stays visible in the log
       // rather than silently re-queueing into a later, different batch.
@@ -80,6 +89,19 @@ export async function dispatchDueBatches(db) {
   }
 
   return { batches: due.length, messages };
+}
+
+/**
+ * The comment-backs that were waiting on this batch (see ruleProcessor):
+ * posted only now that the message has really gone, and never for a failed
+ * batch. Cleared first, so a crash mid-way cannot post one twice.
+ */
+async function postPendingComments(db, rows) {
+  for (const row of rows) {
+    if (!row.pending_comment) continue;
+    db.prepare('UPDATE message_log SET pending_comment = NULL WHERE id = ?').run(row.id);
+    await postRuleComment(db, { ruleId: row.rule_id, workPackageId: row.work_package_id, comment: row.pending_comment });
+  }
 }
 
 export function startOutboundDispatcher(db) {

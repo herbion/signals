@@ -53,6 +53,7 @@ export function ruleToPayload(rule) {
     messageTemplate: rule.message_template,
     commentTemplate: rule.comment_template,
     allowedContactIds: rule.allowed_contact_ids ?? [],
+    batchWindowSeconds: rule.batch_window_seconds ?? null,
     priority: rule.priority,
   };
 }

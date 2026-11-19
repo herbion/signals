@@ -1,8 +1,10 @@
 export function insert(db, entry) {
   db.prepare(
     `INSERT INTO message_log
-       (direction, rule_id, work_package_id, recipient, sender, content, status, error_message, raw_payload)
-     VALUES (@direction, @ruleId, @workPackageId, @recipient, @sender, @content, @status, @errorMessage, @rawPayload)`
+       (direction, rule_id, work_package_id, recipient, sender, content, status, error_message, raw_payload,
+        batch_window_seconds, pending_comment)
+     VALUES (@direction, @ruleId, @workPackageId, @recipient, @sender, @content, @status, @errorMessage, @rawPayload,
+             @batchWindowSeconds, @pendingComment)`
   ).run({
     direction: entry.direction,
     ruleId: entry.ruleId ?? null,
@@ -13,6 +15,8 @@ export function insert(db, entry) {
     status: entry.status,
     errorMessage: entry.errorMessage ?? null,
     rawPayload: entry.rawPayload ? JSON.stringify(entry.rawPayload) : null,
+    batchWindowSeconds: entry.batchWindowSeconds ?? null,
+    pendingComment: entry.pendingComment ?? null,
   });
 }
 

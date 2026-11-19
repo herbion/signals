@@ -4,7 +4,7 @@ import { computed, ref } from 'vue';
 const props = defineProps({
   // { actionRecipientMode, actionRecipientContactId, actionRecipientRaw,
   //   actionRecipientDynamicRelation, messageTemplate, commentTemplate,
-  //   allowedContactIds }
+  //   allowedContactIds, batchWindowSeconds }
   modelValue: { type: Object, required: true },
   contacts: { type: Array, default: () => [] },
   // openproject_settings.metadata_cache -- its customFields list is often
@@ -64,6 +64,17 @@ function toggleAllowed(id, checked) {
   if (checked) next.add(id);
   else next.delete(id);
   update({ allowedContactIds: [...next] });
+}
+
+// Edited in minutes, stored in seconds; blank / 0 = the global grouping window.
+const batchMinutes = computed(() => {
+  const seconds = props.modelValue.batchWindowSeconds;
+  return seconds ? Math.round((seconds / 60) * 10) / 10 : '';
+});
+
+function onBatchMinutes(value) {
+  const minutes = Number(value);
+  update({ batchWindowSeconds: value !== '' && minutes > 0 ? Math.round(minutes * 60) : null });
 }
 
 function insertCommentVariable(name) {
@@ -227,6 +238,24 @@ function insertFormat({ markup, sample }) {
     </div>
 
     <div class="field">
+      <label>Collect this rule's messages for (minutes, optional)</label>
+      <input
+        type="number"
+        min="0"
+        step="1"
+        style="width: 8rem"
+        placeholder="global"
+        :value="batchMinutes"
+        @input="onBatchMinutes($event.target.value)"
+      />
+      <p class="hint">
+        Everything this rule sends one person within that time goes as <strong>one</strong> Signal message, counted from
+        the first one. Blank uses the global grouping window (Settings &rarr; Signal). A window here batches even when
+        global grouping is off. If something else is due to that person sooner, these go along with it.
+      </p>
+    </div>
+
+    <div class="field">
       <label>Comment on the work package (optional)</label>
       <div class="var-buttons">
         <button v-for="v in VARIABLES" :key="v" type="button" class="var-btn" @click="insertCommentVariable(v)">{{ varLabel(v) }}</button>
@@ -239,7 +268,8 @@ function insertFormat({ markup, sample }) {
         @input="update({ commentTemplate: $event.target.value })"
       ></textarea>
       <p class="hint">
-        Posted to the work package's activity once the Signal message has been sent (or queued, with grouping on).
+        Posted to the work package's activity once the Signal message has actually been sent &mdash; after the batch
+        goes out, when batching applies &mdash; and never for a failed or suppressed one.
         Leave blank for no comment. The OpenProject API user needs the &ldquo;Add notes&rdquo; permission.
       </p>
     </div>

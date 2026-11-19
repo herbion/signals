@@ -256,6 +256,14 @@ setTimeout loop like the receive poller, 5s tick) flushes them.
   call, so an overlapping pass can't double-send; rows sharing a `batch_id`
   went out in one Signal message. A failed batch marks every row in it
   `failed` with the reason and leaves `batch_id` set.
+- **A rule can have its own window** (`rules.batch_window_seconds`,
+  migration `020`; NULL = the global one). "Довідка готова" is the reason: a
+  clerk marks a pile of certificates Здано over half an hour, and a 60s window
+  still pinged the requester for each. The window is copied onto each queued
+  row, and a recipient is due as soon as *any* of their rows has waited out
+  its own window -- then everything queued for them goes together, so a
+  long-window message leaves early rather than as a second ping. A rule with
+  a window queues even when `grouping_enabled` is off.
 - The dispatcher ignores `grouping_enabled` when flushing, so switching the
   setting off doesn't strand rows already queued. It also drains whatever a
   restart left pending, since the queue is in SQLite rather than memory.
@@ -330,18 +338,19 @@ equal word set beats a merely-contained one, and two people still left is
 an error naming both -- never a pick. Contacts sharing one Signal number
 count as one person. Initials ("Іванов І.І.") deliberately do not match.
 
-**Commenting back** (`rules.comment_template`, migration `019`): after a
-rule's Signal message is sent -- or queued, with grouping on -- the rendered
-template is posted to `POST /api/v3/work_packages/{id}/activities`
-(`addWorkPackageComment`). Not after a failed, muted or unresolved send: the
-comment claims the person was notified. Its own failure is logged as a
-separate `message_log` row (recipient `OpenProject #id`) and never marks the
-notification failed. The API user needs "Add notes" in the project. The
-comment comes back as another webhook, which is harmless: no condition-relevant
-field changed, so edge triggering keeps the rule quiet. With grouping on, the
-comment goes out before the dispatcher actually sends, so in the rare case
-the batch later fails, the comment is ahead of reality. `{recipient_name}`
-(the resolved contact's name) is available to both templates.
+**Commenting back** (`rules.comment_template`, migration `019`): once a
+rule's Signal message has actually been sent, the rendered template is posted
+to `POST /api/v3/work_packages/{id}/activities` (`rules/commentBack.js`).
+For a queued message the rendered comment waits in
+`message_log.pending_comment` (migration `020`) and the outbound dispatcher
+posts it after the batch goes out -- never for a failed, muted or unresolved
+send, because the comment claims the person was notified. Its own failure is
+logged as a separate `message_log` row (recipient `OpenProject #id`) and never
+marks the notification failed. The API user needs "Add notes" in the
+project. The comment comes back as another webhook, which is harmless: no
+condition-relevant field changed, so edge triggering keeps the rule quiet.
+`{recipient_name}` (the resolved contact's name) is available to both
+templates.
 
 **"Only these contacts"** (`rules.allowed_contact_ids`, also migration `019`)
 is a per-rule limit for trying a rule on real work packages while only test

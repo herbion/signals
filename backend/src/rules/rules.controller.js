@@ -60,6 +60,7 @@ function fromBody(body) {
     messageTemplate,
     commentTemplate,
     allowedContactIds,
+    batchWindowSeconds,
     priority,
   } = body ?? {};
   if (!name || !conditionTree || !messageTemplate) {
@@ -85,6 +86,7 @@ function fromBody(body) {
     messageTemplate,
     commentTemplate,
     allowedContactIds,
+    batchWindowSeconds,
     priority,
   };
 }

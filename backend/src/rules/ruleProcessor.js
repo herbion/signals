@@ -5,7 +5,7 @@ import { evaluateConditionTree, buildEvaluationContext, ruleAlreadyMatched } fro
 import { buildTemplateContext, renderTemplate } from './templateRenderer.js';
 import { sendMessage } from '../signal/signalSender.js';
 import { matchContactByName } from '../contacts/contactNameMatch.js';
-import { addWorkPackageComment } from '../openproject/openprojectClient.js';
+import { postRuleComment } from './commentBack.js';
 
 /**
  * Runs every enabled rule against one processed webhook change event,
@@ -90,10 +90,16 @@ export async function processChangeEvent(db, { snapshot, changeSet, eventType })
       continue;
     }
 
+    const comment = renderComment(rule, ruleContext);
+
     // With grouping on, the message is only queued here; outboundDispatcher
     // combines everything headed to this recipient inside the window into a
     // single Signal message so a bulk edit doesn't fire off a dozen pings.
-    if (grouping) {
+    // A rule with its own batch window queues even with grouping off, and
+    // carries that window onto the row. Its comment-back rides along too, to
+    // be posted when the batch is really sent rather than now.
+    const ruleWindow = ruleBatchWindow(rule);
+    if (grouping || ruleWindow !== null) {
       messageLogRepo.insert(db, {
         direction: 'outbound',
         ruleId: rule.id,
@@ -101,8 +107,9 @@ export async function processChangeEvent(db, { snapshot, changeSet, eventType })
         recipient,
         content,
         status: 'pending',
+        batchWindowSeconds: ruleWindow,
+        pendingComment: comment,
       });
-      await postComment(db, rule, snapshot, ruleContext);
       continue;
     }
 
@@ -129,7 +136,7 @@ export async function processChangeEvent(db, { snapshot, changeSet, eventType })
         errorMessage: err.message,
       });
     }
-    if (sent) await postComment(db, rule, snapshot, ruleContext);
+    if (sent) await postRuleComment(db, { ruleId: rule.id, workPackageId: snapshot.id, comment });
   }
 }
 
@@ -151,35 +158,16 @@ function matchesProjectScope(rule, snapshot) {
   return scope === String(snapshot.project?.id) || scope === snapshot.project?.name;
 }
 
-/**
- * Writes the rule's `comment_template` back onto the work package, when it has
- * one. Called only after the Signal message was sent or queued: the comment
- * tells the people working the ticket that the requester was notified, and
- * saying so after a failed or muted send would be false.
- *
- * Its own failure is logged and swallowed -- the notification already went
- * out and must not be reported as failed because OpenProject refused a note.
- */
-async function postComment(db, rule, snapshot, context) {
-  if (!rule.comment_template || !String(rule.comment_template).trim()) return;
-  const comment = renderTemplate(rule.comment_template, context);
-  const entry = {
-    direction: 'outbound',
-    ruleId: rule.id,
-    workPackageId: snapshot.id,
-    recipient: `OpenProject #${snapshot.id}`,
-    content: `Comment on work package #${snapshot.id}: ${comment}`,
-  };
-  try {
-    const op = db.prepare('SELECT base_url, api_key FROM openproject_settings WHERE id = 1').get();
-    if (!op?.base_url || !op?.api_key) {
-      throw new Error('OpenProject base URL / API key are not configured');
-    }
-    await addWorkPackageComment(op.base_url, op.api_key, snapshot.id, comment);
-    messageLogRepo.insert(db, { ...entry, status: 'sent' });
-  } catch (err) {
-    messageLogRepo.insert(db, { ...entry, status: 'failed', errorMessage: err.message });
-  }
+/** The rule's comment-back, rendered; null when it has none. Posted via commentBack.js once the message is sent. */
+function renderComment(rule, context) {
+  if (!rule.comment_template || !String(rule.comment_template).trim()) return null;
+  return renderTemplate(rule.comment_template, context);
+}
+
+/** The rule's own batching window in seconds, or null to follow the global grouping setting. */
+function ruleBatchWindow(rule) {
+  const seconds = Number(rule.batch_window_seconds);
+  return rule.batch_window_seconds != null && Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds) : null;
 }
 
 const BUILT_IN_RELATIONS = new Set(['author', 'assignee']);

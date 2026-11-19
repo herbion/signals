@@ -29,6 +29,7 @@ const form = ref({
   message_template: '',
   comment_template: '',
   allowed_contact_ids: [],
+  batch_window_seconds: null,
   priority: 0,
 });
 
@@ -43,6 +44,7 @@ const actionModel = computed({
     messageTemplate: form.value.message_template,
     commentTemplate: form.value.comment_template,
     allowedContactIds: form.value.allowed_contact_ids ?? [],
+    batchWindowSeconds: form.value.batch_window_seconds ?? null,
   }),
   set: (v) => {
     form.value.action_recipient_mode = v.actionRecipientMode;
@@ -52,6 +54,7 @@ const actionModel = computed({
     form.value.message_template = v.messageTemplate;
     form.value.comment_template = v.commentTemplate;
     form.value.allowed_contact_ids = v.allowedContactIds ?? [];
+    form.value.batch_window_seconds = v.batchWindowSeconds ?? null;
   },
 });
 

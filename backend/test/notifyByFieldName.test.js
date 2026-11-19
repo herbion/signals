@@ -4,6 +4,7 @@ import { matchContactByName, nameWords } from '../src/contacts/contactNameMatch.
 import { processChangeEvent, resolveRecipient, isDynamicRelation } from '../src/rules/ruleProcessor.js';
 import { processWebhookEvent } from '../src/diff/diffEngine.js';
 import * as rulesRepo from '../src/rules/rules.repository.js';
+import { dispatchDueBatches, findDueRecipients } from '../src/signal/outboundDispatcher.js';
 import { createTestDb } from './testDb.js';
 
 // ------------------------------------------------------------ name matching
@@ -281,7 +282,7 @@ test('a muted recipient gets no message and the work package gets no comment', a
   assert.equal(db.prepare('SELECT status FROM message_log').get().status, 'muted');
 });
 
-test('with grouping on, the message is queued and the comment posted', async (t) => {
+test('with grouping on, the comment waits until the batch is actually sent', async (t) => {
   const calls = captureFetch();
   t.after(() => mock.restoreAll());
 
@@ -290,11 +291,39 @@ test('with grouping on, the message is queued and the comment posted', async (t)
   addDoneRule(db);
 
   await processChangeEvent(db, statusChangeEvent(db));
+  assert.equal(calls.length, 0, 'queued: nothing sent, nothing commented yet');
+  const queued = db.prepare('SELECT status, pending_comment FROM message_log').get();
+  assert.equal(queued.status, 'pending');
+  assert.equal(queued.pending_comment, 'Повідомлено в Signal: Іван Іванов');
 
-  assert.equal(calls.length, 1);
-  assert.match(calls[0].url, /\/activities$/);
-  const statuses = db.prepare('SELECT status FROM message_log ORDER BY id').all().map((r) => r.status);
-  assert.deepEqual(statuses, ['pending', 'sent']);
+  age(db, 120);
+  await dispatchDueBatches(db);
+
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].url, /\/v2\/send$/);
+  assert.match(calls[1].url, /\/activities$/);
+  const rows = db.prepare('SELECT recipient, status, pending_comment FROM message_log ORDER BY id').all();
+  assert.deepEqual(rows.map((r) => r.status), ['sent', 'sent']);
+  assert.equal(rows[0].pending_comment, null, 'cleared once posted');
+});
+
+test('a failed batch posts no comment', async (t) => {
+  const calls = [];
+  mock.method(globalThis, 'fetch', async (url) => {
+    calls.push(String(url));
+    return { ok: false, status: 500, text: async () => 'boom' };
+  });
+  t.after(() => mock.restoreAll());
+
+  const db = setup({ groupingEnabled: 1 });
+  addContact(db, { name: 'Іван Іванов', number: '+380501112233' });
+  addDoneRule(db);
+  await processChangeEvent(db, statusChangeEvent(db));
+  age(db, 120);
+  await dispatchDueBatches(db);
+
+  assert.equal(calls.filter((u) => u.includes('/activities')).length, 0);
+  assert.equal(db.prepare('SELECT status FROM message_log').get().status, 'failed');
 });
 
 test('a rule without a comment template posts no comment', async (t) => {
@@ -377,3 +406,83 @@ function ruleBody(rule) {
     commentTemplate: rule.comment_template,
   };
 }
+
+// ------------------------------------------------------ per-rule batch window
+
+/** Pretends every queued row was created `seconds` ago. */
+function age(db, seconds, where = '1 = 1') {
+  db.prepare(`UPDATE message_log SET created_at = datetime('now', ?) WHERE ${where}`).run(`-${seconds} seconds`);
+}
+
+function addWindowedDoneRule(db, windowSeconds) {
+  const rule = addDoneRule(db);
+  return rulesRepo.update(db, rule.id, { ...ruleBody(rule), batchWindowSeconds: windowSeconds });
+}
+
+/** Several Довідки for one requester marked Здано one after another. */
+async function markDone(db, ids) {
+  for (const id of ids) {
+    processWebhookEvent(db, wp({ id }));
+    const result = processWebhookEvent(
+      db,
+      wp({ id, status: { id: 9, name: 'Здано ✅' }, updatedAt: '2026-11-19T09:00:00Z', action: 'work_package:updated' })
+    );
+    await processChangeEvent(db, result);
+  }
+}
+
+test('a rule window is stored in seconds, blank or 0 meaning the global window', () => {
+  const db = setup();
+  assert.equal(addWindowedDoneRule(db, 1800).batch_window_seconds, 1800);
+  const rule = addDoneRule(db);
+  assert.equal(rulesRepo.update(db, rule.id, { ...ruleBody(rule), batchWindowSeconds: 0 }).batch_window_seconds, null);
+  assert.equal(rulesRepo.update(db, rule.id, { ...ruleBody(rule), batchWindowSeconds: '' }).batch_window_seconds, null);
+});
+
+test('a rule window batches several Довідки into one message even with global grouping off', async (t) => {
+  const calls = captureFetch();
+  t.after(() => mock.restoreAll());
+
+  const db = setup({ groupingEnabled: 0 });
+  addContact(db, { name: 'Іван Іванов', number: '+380501112233' });
+  addWindowedDoneRule(db, 1800);
+
+  await markDone(db, [601, 602, 603]);
+  assert.equal(calls.length, 0, 'all three queued, not sent');
+
+  age(db, 600);
+  assert.deepEqual(findDueRecipients(db, 60), [], 'the global 60s window does not apply to these rows');
+
+  age(db, 1800);
+  await dispatchDueBatches(db);
+
+  const sends = calls.filter((c) => c.url.endsWith('/v2/send'));
+  assert.equal(sends.length, 1, 'one Signal message for three certificates');
+  assert.match(sends[0].body.message, /3 updates/);
+  for (const id of [601, 602, 603]) assert.match(sends[0].body.message, new RegExp(`#${id}`));
+
+  const comments = calls.filter((c) => c.url.includes('/activities')).map((c) => c.url);
+  assert.deepEqual(comments.sort(), [601, 602, 603].map((id) => `http://op.local/api/v3/work_packages/${id}/activities`));
+});
+
+test('a message due sooner for the same person takes the longer-window ones along', async (t) => {
+  const calls = captureFetch();
+  t.after(() => mock.restoreAll());
+
+  const db = setup({ groupingEnabled: 1 });
+  addContact(db, { name: 'Іван Іванов', number: '+380501112233' });
+  addWindowedDoneRule(db, 1800);
+  await markDone(db, [701]);
+  // Something else for the same person on the global 60s window.
+  db.prepare(
+    `INSERT INTO message_log (direction, recipient, content, status) VALUES ('outbound', '+380501112233', 'other', 'pending')`
+  ).run();
+
+  age(db, 90);
+  await dispatchDueBatches(db);
+
+  const sends = calls.filter((c) => c.url.endsWith('/v2/send'));
+  assert.equal(sends.length, 1);
+  assert.match(sends[0].body.message, /2 updates/);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM message_log WHERE status = 'pending'").get().n, 0);
+});
