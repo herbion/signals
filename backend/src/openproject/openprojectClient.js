@@ -369,6 +369,17 @@ export function buildWorkPackagePayload({ projectId, typeId, fields, schema }) {
   return { payload, skipped };
 }
 
+/** One work package as the API returns it (HAL+JSON) -- `normalizeWebhookPayload` flattens it. */
+export async function fetchWorkPackage(baseUrl, apiKey, workPackageId) {
+  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/api/v3/work_packages/${workPackageId}`, {
+    headers: authHeader(apiKey),
+  });
+  if (!response.ok) {
+    throw new Error(`OpenProject API /api/v3/work_packages/${workPackageId} failed: ${response.status}`);
+  }
+  return response.json();
+}
+
 /** Turns an OpenProject error body into something worth showing a human. */
 export function describeOpenProjectError(status, body) {
   let parsed = null;

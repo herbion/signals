@@ -98,26 +98,26 @@ test('isDynamicRelation accepts author, assignee and customFieldNN keys only', (
   assert.equal(isDynamicRelation(null), false);
 });
 
-test('a text custom field resolves to the contact named in it', () => {
+test('a text custom field resolves to the contact named in it', async () => {
   const db = setup();
   addContact(db, { name: 'Іван Іванов', number: '+380501112233' });
   const rule = { action_recipient_mode: 'dynamic', action_recipient_dynamic_relation: 'customField21' };
   const snapshot = { id: 1, customFields: { customField21: 'Іванов Іван Іванович' } };
-  assert.equal(resolveRecipient(db, rule, snapshot), '+380501112233');
+  assert.equal(await resolveRecipient(db, rule, snapshot), '+380501112233');
 });
 
-test('a user-typed custom field resolves through the synced OpenProject user', () => {
+test('a user-typed custom field resolves through the synced OpenProject user', async () => {
   const db = setup();
   addContact(db, { name: 'Somebody Else', number: '+380509998877', openprojectUserId: 42 });
   const rule = { action_recipient_mode: 'dynamic', action_recipient_dynamic_relation: 'customField30' };
   const snapshot = { id: 1, customFields: { customField30: { id: 42, name: 'Іванов Іван', kind: 'user' } } };
-  assert.equal(resolveRecipient(db, rule, snapshot), '+380509998877');
+  assert.equal(await resolveRecipient(db, rule, snapshot), '+380509998877');
 });
 
-test('an empty custom field says so', () => {
+test('an empty custom field says so', async () => {
   const db = setup();
   const rule = { action_recipient_mode: 'dynamic', action_recipient_dynamic_relation: 'customField21' };
-  assert.throws(
+  await assert.rejects(
     () => resolveRecipient(db, rule, { id: 1, customFields: { customField21: '' } }),
     /no value in customField21/
   );
@@ -554,37 +554,37 @@ const zamovnyk = (id, name = '1МБ - Бік Андрій') => ({
   customFields: { customField19: { id, name, kind: 'option' } },
 });
 
-test('an option field resolves to the contact classified with that option', () => {
+test('an option field resolves to the contact classified with that option', async () => {
   const db = setup();
   addContact(db, { name: '1МБ - Бік Андрій', number: '+380501112233' });
   addContact(db, { name: '2МБ - Пишний Василь', number: '+380504445566' });
   classify(db, '+380501112233', { customField19: '57' });
   classify(db, '+380504445566', { customField19: '17' });
-  assert.equal(resolveRecipient(db, zamovnykRule, zamovnyk(57)), '+380501112233');
+  assert.equal(await resolveRecipient(db, zamovnykRule, zamovnyk(57)), '+380501112233');
 });
 
-test('an option id is never looked up as an OpenProject user id', () => {
+test('an option id is never looked up as an OpenProject user id', async () => {
   const db = setup();
   // User 57 exists as a contact, but option 57 is somebody else's Замовник.
   addContact(db, { name: 'Unrelated user', number: '+380507770000', openprojectUserId: 57 });
-  assert.throws(() => resolveRecipient(db, zamovnykRule, zamovnyk(57)), /No contact is classified with customField19/);
+  await assert.rejects(() => resolveRecipient(db, zamovnykRule, zamovnyk(57)), /No contact is classified with customField19/);
 });
 
-test('an option nobody is classified with explains how to fix it', () => {
+test('an option nobody is classified with explains how to fix it', async () => {
   const db = setup();
-  assert.throws(
-    () => resolveRecipient(db, zamovnykRule, zamovnyk(57, 'Запит')),
-    /customField19 = "Запит" \(option 57\)\. Set it on the right contact/
+  await assert.rejects(
+    () => resolveRecipient(db, zamovnykRule, zamovnyk(57, '3МБ - Новий')),
+    /customField19 = "3МБ - Новий" \(option 57\)\. Set it on the right contact/
   );
 });
 
-test('two different people classified with one option is an error, not a pick', () => {
+test('two different people classified with one option is an error, not a pick', async () => {
   const db = setup();
   addContact(db, { name: 'A', number: '+380501112233' });
   addContact(db, { name: 'B', number: '+380504445566' });
   classify(db, '+380501112233', { customField19: 57 });
   classify(db, '+380504445566', { customField19: '57' });
-  assert.throws(() => resolveRecipient(db, zamovnykRule, zamovnyk(57)), /more than one contact \("A", "B"\)/);
+  await assert.rejects(() => resolveRecipient(db, zamovnykRule, zamovnyk(57)), /more than one contact \("A", "B"\)/);
 });
 
 test('the Замовник rule end to end: real payload in, requester notified, comment back', async (t) => {
@@ -622,4 +622,110 @@ test('the Замовник rule end to end: real payload in, requester notified,
   assert.deepEqual(calls[0].body.recipients, ['+380501112233']);
   assert.equal(calls[0].body.message, '✅ Ваша довідка Форма 6 для ЧИЧУК Ярослав Олегович - готова');
   assert.deepEqual(calls[1].body, { comment: { raw: 'Повідомлено в Signal: 1МБ - Бік Андрій' } });
+});
+
+// ------------------------------------- 👤Замовник = "Запит": the parent's assignee
+
+/** A Довідка ordered as part of a Запит: Замовник is the request, the work package is its child. */
+const zapytChild = (parent = { id: 900, name: 'Запит від 3МБ' }) => ({
+  id: 4183,
+  parent,
+  customFields: { customField19: { id: 12, name: 'Запит', kind: 'option' } },
+});
+
+/** OpenProject answering GET /work_packages/:id with that work package's assignee. */
+function serveWorkPackage(t, { id = 900, assignee = { href: '/api/v3/users/42', title: 'Грінько Оксана' }, status = 200 } = {}) {
+  const calls = [];
+  mock.method(globalThis, 'fetch', async (url, options) => {
+    calls.push({ url: String(url), options });
+    return {
+      ok: status < 300,
+      status,
+      json: async () => ({ id, subject: 'Запит від 3МБ', _links: { assignee: assignee ?? { href: null } } }),
+      text: async () => '',
+    };
+  });
+  t.after(() => mock.restoreAll());
+  return calls;
+}
+
+test('"Запит" as Замовник is recognised however the label is decorated', async () => {
+  const { isRequestOption } = await import('../src/rules/ruleProcessor.js');
+  assert.equal(isRequestOption({ name: 'Запит' }), true);
+  assert.equal(isRequestOption({ name: ' 📩 ЗАПИТ ' }), true);
+  assert.equal(isRequestOption({ name: 'Запити' }), false);
+  assert.equal(isRequestOption({ name: '1МБ - Бік Андрій' }), false);
+  assert.equal(isRequestOption(null), false);
+});
+
+test('Замовник "Запит" notifies the assignee of the parent work package, read live', async (t) => {
+  const calls = serveWorkPackage(t);
+  const db = setup();
+  addContact(db, { name: 'Грінько Оксана', number: '+380501230000', openprojectUserId: 42 });
+
+  assert.equal(await resolveRecipient(db, zamovnykRule, zapytChild()), '+380501230000');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'http://op.local/api/v3/work_packages/900');
+  assert.match(calls[0].options.headers.Authorization, /^Basic /);
+});
+
+test('"Запит" is never looked up in the classification, even if a contact carries that option', async (t) => {
+  serveWorkPackage(t);
+  const db = setup();
+  addContact(db, { name: 'Грінько Оксана', number: '+380501230000', openprojectUserId: 42 });
+  addContact(db, { name: 'Someone classified as Запит', number: '+380509990000' });
+  classify(db, '+380509990000', { customField19: '12' });
+  assert.equal(await resolveRecipient(db, zamovnykRule, zapytChild()), '+380501230000');
+});
+
+test('"Запит" with no parent says so instead of guessing', async () => {
+  const db = setup();
+  await assert.rejects(
+    () => resolveRecipient(db, zamovnykRule, zapytChild(null)),
+    /customField19 is "Запит", which is not a person, and work package #4183 has no parent/
+  );
+});
+
+test('a parent with no assignee is reported', async (t) => {
+  serveWorkPackage(t, { assignee: null });
+  const db = setup();
+  await assert.rejects(
+    () => resolveRecipient(db, zamovnykRule, zapytChild()),
+    /parent work package #900 has no assignee to notify/
+  );
+});
+
+test('a parent assignee with no synced contact points at contact sync', async (t) => {
+  serveWorkPackage(t);
+  const db = setup();
+  await assert.rejects(
+    () => resolveRecipient(db, zamovnykRule, zapytChild()),
+    /No contact linked to OpenProject user Грінько Оксана \(assignee of parent #900\)/
+  );
+});
+
+test('when OpenProject cannot be read, the cached parent is used; with neither, the API error is reported', async (t) => {
+  serveWorkPackage(t, { status: 503 });
+  const db = setup();
+  addContact(db, { name: 'Грінько Оксана', number: '+380501230000', openprojectUserId: 42 });
+
+  await assert.rejects(
+    () => resolveRecipient(db, zamovnykRule, zapytChild()),
+    /Cannot read parent work package #900: .*failed: 503/
+  );
+
+  db.prepare(
+    `INSERT INTO work_package_state_cache (work_package_id, project_id, snapshot, payload_hash, last_updated_at)
+     VALUES (900, 5, ?, 'h', '2026-11-19T08:00:00Z')`
+  ).run(JSON.stringify({ id: 900, assignee: { id: 42, name: 'Грінько Оксана' } }));
+  assert.equal(await resolveRecipient(db, zamovnykRule, zapytChild()), '+380501230000');
+});
+
+test('the webhook snapshot carries the parent link', () => {
+  const payload = structuredClone(REAL_DOVIDKA);
+  payload.work_package._links.parent = { href: '/api/v3/work_packages/900', title: 'Запит від 3МБ' };
+  assert.deepEqual(normalizeWebhookPayload(payload).parent, { id: 900, name: 'Запит від 3МБ' });
+
+  payload.work_package._links.parent = { href: null };
+  assert.equal(normalizeWebhookPayload(payload).parent, null);
 });
