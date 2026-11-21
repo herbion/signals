@@ -25,6 +25,9 @@ export function normalizeWebhookPayload(body) {
     assignee: pickRelation(embedded.assignee, links.assignee),
     author: pickRelation(embedded.author, links.author),
     priority: pickRelation(embedded.priority, links.priority),
+    // `_links.parent` is always present; with no parent its href is null and
+    // pickRelation returns null. Not diffed -- only read to find who to notify.
+    parent: pickRelation(embedded.parent, links.parent),
     customFields: extractCustomFields(wp, embedded, links),
     createdAt: wp.createdAt ?? null,
     updatedAt: wp.updatedAt ?? null,

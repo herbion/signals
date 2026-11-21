@@ -340,6 +340,19 @@ tried first and is the wrong person: a dry run against 1,965 cached Довідк
 matched a contact twice, because the soldiers named there are almost never
 contacts.
 
+**👤Замовник = "Запит" is not a person.** A certificate ordered as part of a
+Запит is filed as that request's *child*, with "Запит" as its Замовник -- no
+contact is (or should be) classified with that option. `contactFromCustomField`
+catches it (`isRequestOption`: letters only, case-folded) *before* the
+classification lookup and notifies the **parent work package's assignee**
+instead, through the same `openproject_user_id` join as `assignee` -- that is
+someone contact sync already covers. The parent id comes from `_links.parent`
+(`snapshot.parent`, not diffed); its assignee is read **live**
+(`GET /api/v3/work_packages/{id}`), falling back to the state cache only if the
+API cannot be reached, since the cached copy is whatever the last webhook said.
+No parent, no assignee or no linked contact is an error in `message_log`, as
+everywhere else. This made `resolveRecipient`/`resolveRecipientDetails` async.
+
 **Matching a person by name** remains for text fields generally. A wrong
 match sends someone else's news to a real person. A wrong match sends someone else's certificate news to a real
 person, so `matchContactByName` is strict: every word of the contact's name

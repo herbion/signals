@@ -19,11 +19,11 @@ function insertContact(db, { name, phone, openprojectUserId = null }) {
 
 const snapshotWithAuthor = { id: 7, author: { id: 42, name: 'Ivan' }, assignee: { id: 43, name: 'Olga' } };
 
-test('dynamic recipient resolves the author to their synced contact', () => {
+test('dynamic recipient resolves the author to their synced contact', async () => {
   const db = createTestDb();
   insertContact(db, { name: 'Ivan', phone: '+15551110000', openprojectUserId: 42 });
 
-  const recipient = resolveRecipient(
+  const recipient = await resolveRecipient(
     db,
     { action_recipient_mode: 'dynamic', action_recipient_dynamic_relation: 'author' },
     snapshotWithAuthor
@@ -31,11 +31,11 @@ test('dynamic recipient resolves the author to their synced contact', () => {
   assert.equal(recipient, '+15551110000');
 });
 
-test('dynamic recipient can target the assignee instead', () => {
+test('dynamic recipient can target the assignee instead', async () => {
   const db = createTestDb();
   insertContact(db, { name: 'Olga', phone: '+15552220000', openprojectUserId: 43 });
 
-  const recipient = resolveRecipient(
+  const recipient = await resolveRecipient(
     db,
     { action_recipient_mode: 'dynamic', action_recipient_dynamic_relation: 'assignee' },
     snapshotWithAuthor
@@ -43,9 +43,9 @@ test('dynamic recipient can target the assignee instead', () => {
   assert.equal(recipient, '+15552220000');
 });
 
-test('dynamic recipient explains itself when the user has no linked contact', () => {
+test('dynamic recipient explains itself when the user has no linked contact', async () => {
   const db = createTestDb();
-  assert.throws(
+  await assert.rejects(
     () =>
       resolveRecipient(
         db,
@@ -56,9 +56,9 @@ test('dynamic recipient explains itself when the user has no linked contact', ()
   );
 });
 
-test('dynamic recipient explains itself when the work package has no such person', () => {
+test('dynamic recipient explains itself when the work package has no such person', async () => {
   const db = createTestDb();
-  assert.throws(
+  await assert.rejects(
     () =>
       resolveRecipient(
         db,
@@ -69,23 +69,23 @@ test('dynamic recipient explains itself when the work package has no such person
   );
 });
 
-test('contact mode still resolves a fixed contact, and falls back to raw', () => {
+test('contact mode still resolves a fixed contact, and falls back to raw', async () => {
   const db = createTestDb();
   const contact = insertContact(db, { name: 'Fixed', phone: '+15553330000' });
 
   assert.equal(
-    resolveRecipient(db, { action_recipient_mode: 'contact', action_recipient_contact_id: contact.id }, snapshotWithAuthor),
+    await resolveRecipient(db, { action_recipient_mode: 'contact', action_recipient_contact_id: contact.id }, snapshotWithAuthor),
     '+15553330000'
   );
   assert.equal(
-    resolveRecipient(db, { action_recipient_mode: 'raw', action_recipient_raw: '+15554440000' }, snapshotWithAuthor),
+    await resolveRecipient(db, { action_recipient_mode: 'raw', action_recipient_raw: '+15554440000' }, snapshotWithAuthor),
     '+15554440000'
   );
 });
 
-test('a rule with no recipient at all throws rather than silently sending nowhere', () => {
+test('a rule with no recipient at all throws rather than silently sending nowhere', async () => {
   const db = createTestDb();
-  assert.throws(() => resolveRecipient(db, { action_recipient_mode: 'contact' }, snapshotWithAuthor), /no recipient configured/);
+  await assert.rejects(() => resolveRecipient(db, { action_recipient_mode: 'contact' }, snapshotWithAuthor), /no recipient configured/);
 });
 
 test('extractPhone reads plain and formatted custom field values, ignoring blanks', () => {

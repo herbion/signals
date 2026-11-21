@@ -6,6 +6,9 @@ import { buildTemplateContext, renderTemplate } from './templateRenderer.js';
 import { sendMessage } from '../signal/signalSender.js';
 import { matchContactByName } from '../contacts/contactNameMatch.js';
 import { postRuleComment } from './commentBack.js';
+import { fetchWorkPackage } from '../openproject/openprojectClient.js';
+import { normalizeWebhookPayload } from '../webhooks/payloadNormalizer.js';
+import * as stateCacheRepo from '../diff/stateCache.repository.js';
 
 /**
  * Runs every enabled rule against one processed webhook change event,
@@ -37,7 +40,7 @@ export async function processChangeEvent(db, { snapshot, changeSet, eventType })
     let recipient;
     let recipientName = '';
     try {
-      ({ identifier: recipient, name: recipientName } = resolveRecipientDetails(db, rule, snapshot));
+      ({ identifier: recipient, name: recipientName } = await resolveRecipientDetails(db, rule, snapshot));
     } catch (err) {
       const content = renderTemplate(rule.message_template, { ...templateContext, recipient_name: '' });
       messageLogRepo.insert(db, {
@@ -185,6 +188,9 @@ export function isDynamicRelation(value) {
  *                - 'author' / 'assignee', or a User-typed custom field: an
  *                  OpenProject user, mapped to a contact via
  *                  contacts.openproject_user_id (contact sync fills it);
+ *                - a list option ("👤Замовник"): the contact classified with
+ *                  it -- except "Запит", which is a request, not a person:
+ *                  that one notifies the assignee of the parent work package;
  *                - a text custom field ("🎯На кого" holds a ПІБ, not a user):
  *                  matched against contact names, strictly -- see
  *                  contacts/contactNameMatch.js.
@@ -193,16 +199,16 @@ export function isDynamicRelation(value) {
  * Modes other than 'dynamic' fall through contact -> raw, which is also what
  * rules created before the mode column existed rely on.
  */
-export function resolveRecipient(db, rule, snapshot) {
-  return resolveRecipientDetails(db, rule, snapshot).identifier;
+export async function resolveRecipient(db, rule, snapshot) {
+  return (await resolveRecipientDetails(db, rule, snapshot)).identifier;
 }
 
 /** `resolveRecipient`, plus the contact's name for the `{recipient_name}` variable. */
-export function resolveRecipientDetails(db, rule, snapshot) {
+export async function resolveRecipientDetails(db, rule, snapshot) {
   if (rule.action_recipient_mode === 'dynamic') {
     const relation = rule.action_recipient_dynamic_relation || 'author';
     const contact = CUSTOM_FIELD_KEY.test(relation)
-      ? contactFromCustomField(db, relation, snapshot)
+      ? await contactFromCustomField(db, relation, snapshot)
       : contactFromUser(db, relation, snapshot?.[relation]);
     return { identifier: contact.signal_identifier, name: contact.name };
   }
@@ -230,7 +236,7 @@ function contactFromUser(db, label, person) {
   return contact;
 }
 
-function contactFromCustomField(db, key, snapshot) {
+async function contactFromCustomField(db, key, snapshot) {
   const value = snapshot?.customFields?.[key];
 
   // `kind` comes from the link's href (payloadNormalizer). User ids and
@@ -238,9 +244,56 @@ function contactFromCustomField(db, key, snapshot) {
   // never be looked up as a user: option 57 would find whoever is user 57.
   if (value && typeof value === 'object') {
     if (value.kind === 'user') return contactFromUser(db, key, value);
+    if (isRequestOption(value)) return contactFromParentAssignee(db, key, value, snapshot);
     return contactByClassification(db, key, value);
   }
   return contactByName(db, key, value);
+}
+
+/**
+ * "Запит" as the 👤Замовник is not a person: the certificate was ordered as
+ * part of a Запит work package, and is filed as that request's child. Whoever
+ * is handling the request -- its assignee -- is the one waiting for the
+ * certificate. Letters only, case-folded, so an emoji or stray space in the
+ * option label does not stop it matching.
+ */
+export function isRequestOption(value) {
+  return String(value?.name ?? '').toLocaleLowerCase('uk').replace(/[^\p{L}]/gu, '') === 'запит';
+}
+
+async function contactFromParentAssignee(db, key, value, snapshot) {
+  const parentId = snapshot?.parent?.id;
+  if (!parentId) {
+    throw new Error(
+      `${key} is "${value.name}", which is not a person, and work package #${snapshot?.id} has no parent ` +
+        'whose assignee could be notified instead'
+    );
+  }
+  const parent = await loadWorkPackage(db, parentId);
+  if (!parent.assignee?.id) {
+    throw new Error(`${key} is "${value.name}", and its parent work package #${parentId} has no assignee to notify`);
+  }
+  return contactFromUser(db, `assignee of parent #${parentId}`, parent.assignee);
+}
+
+/**
+ * The parent's *current* assignee, read live from OpenProject. The state cache
+ * is the fallback only -- it holds whatever the last webhook for that work
+ * package said, which can be long out of date, or absent when the parent lives
+ * in a project no webhook watches.
+ */
+async function loadWorkPackage(db, workPackageId) {
+  let liveError;
+  try {
+    const op = db.prepare('SELECT base_url, api_key FROM openproject_settings WHERE id = 1').get();
+    if (!op?.base_url || !op?.api_key) throw new Error('OpenProject base URL / API key are not configured');
+    return normalizeWebhookPayload(await fetchWorkPackage(op.base_url, op.api_key, workPackageId));
+  } catch (err) {
+    liveError = err;
+  }
+  const cached = stateCacheRepo.getByWorkPackageId(db, workPackageId);
+  if (cached) return cached.snapshot;
+  throw new Error(`Cannot read parent work package #${workPackageId}: ${liveError.message}`);
 }
 
 /**
